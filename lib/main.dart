@@ -3,10 +3,15 @@ import 'package:flutter/services.dart';
 import 'theme/app_theme.dart';
 import 'components/cards/standard_card.dart';
 import 'components/buttons/app_buttons.dart';
+import 'components/mqtt_status_icon.dart';
 import 'pages/ble_device_list_page.dart';
 import 'theme/colors.dart';
 import 'theme/text_styles.dart';
 import 'constants/dimensions.dart';
+import 'mqtt/mqtt_service.dart';
+import 'mqtt/models/mqtt_message.dart';
+import 'services/device_id_service.dart';
+import 'dart:async';
 
 void main() {
   runApp(const MyApp());
@@ -38,17 +43,204 @@ class MyHomePage extends StatefulWidget {
 
 class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
   late TabController _tabController;
+  final MQTTService _mqttService = MQTTService();
+  final DeviceIdService _deviceIdService = DeviceIdService();
+  late StreamSubscription<MQTTTopicMessage> _messageSubscription;
+
+  String? _deviceId;
+  String? _formattedDeviceId;
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 4, vsync: this);
+    _initDeviceId();
+    _initMQTT();
   }
 
   @override
   void dispose() {
     _tabController.dispose();
+    _messageSubscription.cancel();
     super.dispose();
+  }
+
+  /// 初始化设备ID
+  void _initDeviceId() async {
+    try {
+      final deviceId = await _deviceIdService.getDeviceId();
+      final formattedId = _deviceIdService.formatDeviceIdForDisplay(deviceId);
+
+      setState(() {
+        _deviceId = deviceId;
+        _formattedDeviceId = formattedId;
+      });
+
+      // 初始化MQTT连接
+      _mqttService.connect();
+
+      print('✅ 设备ID初始化完成: $_formattedDeviceId');
+    } catch (e) {
+      print('❌ 设备ID初始化失败: $e');
+    }
+  }
+
+  /// 初始化MQTT
+  void _initMQTT() {
+    // 监听MQTT消息
+    _messageSubscription = _mqttService.messageStream.listen((message) {
+      print('收到MQTT消息: ${message.toString()}');
+    });
+  }
+
+  /// 显示MQTT状态对话框
+  void _showMQTTStatus(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text('MQTT连接状态'),
+          content: StreamBuilder<MQTTConnectionStatus>(
+            stream: _mqttService.statusStream,
+            initialData: _mqttService.currentStatus,
+            builder: (context, snapshot) {
+              final status = snapshot.data ?? MQTTConnectionStatus.disconnected;
+
+              return Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // 设备ID显示
+                  if (_deviceId != null) ...[
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: AppColors.gray50,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: AppColors.outline),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(
+                            Icons.fingerprint,
+                            size: 16,
+                            color: AppColors.gray600,
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              '设备ID: $_deviceId',
+                              style: AppTextStyles.bodyText2.copyWith(
+                                color: AppColors.gray600,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                  ],
+                  // 状态显示
+                  Row(
+                    children: [
+                      Icon(
+                        _getStatusIcon(status),
+                        color: _getStatusColor(status),
+                        size: 24,
+                      ),
+                      const SizedBox(width: 12),
+                      Text(
+                        _getStatusText(status),
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w500,
+                          color: _getStatusColor(status),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+
+                  // 操作按钮
+                  if (status != MQTTConnectionStatus.connected &&
+                      status != MQTTConnectionStatus.connecting)
+                    ElevatedButton.icon(
+                      onPressed: () {
+                        Navigator.pop(context);
+                        _mqttService.connect();
+                      },
+                      icon: const Icon(Icons.refresh),
+                      label: const Text('重新连接'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.primaryGreen,
+                        foregroundColor: Colors.white,
+                      ),
+                    ),
+                  if (status == MQTTConnectionStatus.connected)
+                    TextButton.icon(
+                      onPressed: () {
+                        Navigator.pop(context);
+                        _mqttService.disconnect();
+                      },
+                      icon: const Icon(Icons.power_settings_new),
+                      label: const Text('断开连接'),
+                    ),
+                ],
+              );
+            },
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('关闭'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  /// 获取状态图标
+  IconData _getStatusIcon(MQTTConnectionStatus status) {
+    switch (status) {
+      case MQTTConnectionStatus.connected:
+        return Icons.wifi;
+      case MQTTConnectionStatus.connecting:
+        return Icons.wifi_tethering;
+      case MQTTConnectionStatus.disconnected:
+        return Icons.wifi_off;
+      case MQTTConnectionStatus.error:
+        return Icons.error;
+    }
+  }
+
+  /// 获取状态颜色
+  Color _getStatusColor(MQTTConnectionStatus status) {
+    switch (status) {
+      case MQTTConnectionStatus.connected:
+        return Colors.green;
+      case MQTTConnectionStatus.connecting:
+        return Colors.orange;
+      case MQTTConnectionStatus.disconnected:
+        return Colors.grey;
+      case MQTTConnectionStatus.error:
+        return Colors.red;
+    }
+  }
+
+  /// 获取状态文本
+  String _getStatusText(MQTTConnectionStatus status) {
+    switch (status) {
+      case MQTTConnectionStatus.connected:
+        return '已连接到MQTT服务器';
+      case MQTTConnectionStatus.connecting:
+        return '正在连接...';
+      case MQTTConnectionStatus.disconnected:
+        return '未连接';
+      case MQTTConnectionStatus.error:
+        return '连接错误';
+    }
   }
 
   @override
@@ -117,18 +309,40 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
                     'ReAI Assistant',
                     style: AppTextStyles.headline3,
                   ),
-                  Text(
-                    '硬件AI助手',
-                    style: AppTextStyles.caption.copyWith(color: AppColors.gray600),
-                  ),
+                  if (_formattedDeviceId != null) ...[
+                    const SizedBox(height: 2),
+                    Row(
+                      children: [
+                        Icon(
+                          Icons.fingerprint,
+                          size: AppDimensions.iconSmall - 2,
+                          color: AppColors.gray400,
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          '设备: $_formattedDeviceId',
+                          style: AppTextStyles.caption.copyWith(
+                            color: AppColors.gray400,
+                            fontSize: 10,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
                 ],
               ),
             ],
           ),
           const Spacer(),
-          // 操作按钮
+          // MQTT状态和操作按钮
           Row(
             children: [
+              // MQTT连接状态图标
+              MQTTStatusIconWithAction(
+                size: 20,
+                onTap: () => _showMQTTStatus(context),
+              ),
+              const SizedBox(width: AppDimensions.sm),
               IconButtonWidget(
                 icon: Icons.search,
                 tooltip: '搜索',

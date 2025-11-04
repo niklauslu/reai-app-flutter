@@ -6,13 +6,14 @@
 
 **ReAI Assistant** - 硬件AI助手Flutter应用，具备BLE设备管理功能。
 
-**技术栈**: Flutter 3.9.2+, Dart, Material 3, flutter_blue_plus, Riverpod (已配置但未使用)
+**技术栈**: Flutter 3.9.2+, Dart, Material 3, flutter_blue_plus, mqtt_client, Riverpod (已配置但未使用)
 
 **核心功能**:
 - BLE设备扫描和连接管理
 - 硬件设备分类 (DYJ V1/V2, DYJ Card, ReAI Glass)
 - AI助手界面 (UI已完成，后端集成待实现)
 - 硬件产品展示和管理
+- MQTT实时通信和设备状态管理
 
 ## 架构设计
 
@@ -26,10 +27,11 @@
 lib/
 ├── components/     # 可复用UI组件 (按钮、卡片)
 ├── ble/           # BLE功能 (服务、设备模型)
+├── mqtt/          # MQTT通信 (服务、配置、消息模型)
 ├── pages/         # 页面实现
 ├── theme/         # 设计系统 (颜色、文字样式、主题)
 ├── constants/     # 应用常量 (尺寸、时长)
-└── services/      # 服务层 (为未来扩展预留)
+└── services/      # 服务层 (设备ID管理等)
 ```
 
 ### BLE架构
@@ -40,6 +42,16 @@ lib/
   - `*Card*` → dyjCard
   - `*ReAI*/*Glass*` → reaiGlass
   - 其他 → other
+
+### MQTT架构
+- **MQTTService**: 单例服务，管理连接、订阅、消息收发
+- **MQTTConfig**: 服务器配置、主题管理、连接参数
+- **设备ID管理**: 基于系统ID的设备标识服务，支持持久化存储
+- **主题结构**:
+  - 设备状态: `device/{deviceId}/status`
+  - 设备请求: `device/{deviceId}/request`
+  - 消息通信: `message/{deviceId}/request|response`
+- **连接特性**: 自动重连、心跳保活、状态监控
 
 ### 设计系统
 - **色彩方案**: 白绿黑主题
@@ -150,3 +162,10 @@ flutter pub upgrade
 - 核心逻辑在 `ble/ble_service.dart`
 - 设备模型在 `ble/ble_device_model.dart`
 - UI实现在 `pages/ble_device_list_page.dart`
+
+### MQTT功能开发
+- 核心服务在 `mqtt/mqtt_service.dart`
+- 配置管理在 `mqtt/mqtt_config.dart`
+- 消息模型在 `mqtt/models/mqtt_message.dart`
+- 设备ID管理在 `services/device_id_service.dart`
+- UI状态图标在 `components/mqtt_status_icon.dart`
