@@ -1,0 +1,25 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <!-- 背景 -->
+  <rect width="1024" height="1024" rx="180" fill="#1A1A1A"/>
+
+  <!-- AI助手图标 - 简洁的机器人头部设计 -->
+  <g transform="translate(512, 512)">
+    <!-- 头部主体 -->
+    <circle cx="0" cy="0" r="200" fill="#00D474" stroke="white" stroke-width="8"/>
+
+    <!-- 眼睛 -->
+    <circle cx="-60" cy="-30" r="25" fill="#1A1A1A"/>
+    <circle cx="60" cy="-30" r="25" fill="#1A1A1A"/>
+
+    <!-- 眼睛高光 -->
+    <circle cx="-55" cy="-35" r="8" fill="white"/>
+    <circle cx="65" cy="-35" r="8" fill="white"/>
+
+    <!-- 嘴巴 - 微笑 -->
+    <path d="M -80 30 Q 0 80 80 30" stroke="#1A1A1A" stroke-width="12" fill="none" stroke-linecap="round"/>
+
+    <!-- 天线 -->
+    <line x1="0" y1="-200" x2="0" y2="-250" stroke="white" stroke-width="8" stroke-linecap="round"/>
+    <circle cx="0" cy="-260" r="15" fill="white"/>
+  </g>
+</svg>
