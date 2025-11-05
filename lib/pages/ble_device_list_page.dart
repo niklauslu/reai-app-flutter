@@ -10,6 +10,7 @@ import '../components/cards/standard_card.dart';
 import '../theme/colors.dart';
 import '../theme/text_styles.dart';
 import '../constants/dimensions.dart';
+import 'ble_device_detail_page.dart';
 
 /// BLE设备列表页面
 class BLEDeviceListPage extends StatefulWidget {
@@ -137,20 +138,17 @@ class _BLEDeviceListPageState extends State<BLEDeviceListPage> {
     }
   }
 
-  /// 连接设备
-  Future<void> _connectToDevice(BLEDeviceModel device) async {
-    if (device.isConnected) {
-      // 如果已连接，则断开
-      await _bleService.disconnectDevice(device);
-    } else {
-      // 如果未连接，则连接
-      bool success = await _bleService.connectToDevice(device);
-      if (success) {
-        _showConnectionSuccessDialog(device);
-      } else {
-        _showConnectionFailedDialog(device);
-      }
-    }
+  /// 导航到设备详情页
+  Future<void> _navigateToDeviceDetail(BLEDeviceModel device) async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => BLEDeviceDetailPage(device: device),
+      ),
+    );
+
+    // 返回后刷新设备列表以更新连接状态
+    await _refreshDevices();
   }
 
   /// 刷新设备列表
@@ -207,40 +205,7 @@ class _BLEDeviceListPageState extends State<BLEDeviceListPage> {
     );
   }
 
-  /// 显示连接成功对话框
-  void _showConnectionSuccessDialog(BLEDeviceModel device) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('连接成功'),
-        content: Text('已成功连接到 ${device.name}'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('确定'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  /// 显示连接失败对话框
-  void _showConnectionFailedDialog(BLEDeviceModel device) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('连接失败'),
-        content: Text('无法连接到 ${device.name}，请确保设备在范围内并重试。'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('确定'),
-          ),
-        ],
-      ),
-    );
-  }
-
+  
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -377,9 +342,12 @@ class _BLEDeviceListPageState extends State<BLEDeviceListPage> {
 
   /// 构建设备卡片
   Widget _buildDeviceCard(BLEDeviceModel device) {
+    // 检查设备是否为当前连接的设备
+    bool isConnected = _bleService.isDeviceConnected(device.id);
+
     return StandardCard(
       margin: const EdgeInsets.only(bottom: AppDimensions.sm),
-      onTap: () => _connectToDevice(device),
+      onTap: () => _navigateToDeviceDetail(device),
       child: Row(
         children: [
           // 设备图标
@@ -389,11 +357,14 @@ class _BLEDeviceListPageState extends State<BLEDeviceListPage> {
             decoration: BoxDecoration(
               color: _getDeviceColor(device.type).withOpacity(0.1),
               borderRadius: BorderRadius.circular(AppDimensions.smallCardRadius),
+              border: isConnected
+                  ? Border.all(color: AppColors.primaryGreen, width: 2)
+                  : null,
             ),
             child: Icon(
               _getDeviceIcon(device.type),
               size: AppDimensions.iconLarge,
-              color: _getDeviceColor(device.type),
+              color: isConnected ? AppColors.primaryGreen : _getDeviceColor(device.type),
             ),
           ),
           const SizedBox(width: AppDimensions.md),
@@ -407,7 +378,10 @@ class _BLEDeviceListPageState extends State<BLEDeviceListPage> {
                   children: [
                     Text(
                       device.name,
-                      style: AppTextStyles.headline4,
+                      style: AppTextStyles.headline4.copyWith(
+                        color: isConnected ? AppColors.primaryGreen : null,
+                        fontWeight: isConnected ? FontWeight.bold : null,
+                      ),
                     ),
                     const SizedBox(width: AppDimensions.xs),
                     if (device.version != null)
@@ -429,7 +403,46 @@ class _BLEDeviceListPageState extends State<BLEDeviceListPage> {
                         ),
                       ),
                     const Spacer(),
-                    ConnectionIndicator(isConnected: device.isConnected),
+                    // 连接状态标识
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: AppDimensions.xs,
+                        vertical: 2,
+                      ),
+                      decoration: BoxDecoration(
+                        color: isConnected
+                            ? AppColors.primaryGreen.withOpacity(0.1)
+                            : Colors.grey.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: isConnected
+                              ? AppColors.primaryGreen
+                              : Colors.grey,
+                        ),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.bluetooth_connected,
+                            size: 12,
+                            color: isConnected
+                                ? AppColors.primaryGreen
+                                : Colors.grey,
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            isConnected ? '已连接' : '未连接',
+                            style: AppTextStyles.overline.copyWith(
+                              color: isConnected
+                                  ? AppColors.primaryGreen
+                                  : Colors.grey,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                   ],
                 ),
                 const SizedBox(height: AppDimensions.xs),
@@ -454,6 +467,26 @@ class _BLEDeviceListPageState extends State<BLEDeviceListPage> {
                         color: AppColors.gray600,
                       ),
                     ),
+                    if (isConnected) ...[
+                      const SizedBox(width: AppDimensions.sm),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 6,
+                          vertical: 2,
+                        ),
+                        decoration: BoxDecoration(
+                          color: AppColors.primaryGreen,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text(
+                          '当前设备',
+                          style: AppTextStyles.overline.copyWith(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               ],
