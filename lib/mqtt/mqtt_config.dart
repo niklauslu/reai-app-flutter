@@ -7,9 +7,9 @@ class MQTTConfig {
   static const String username = 'device_user';
   static const String password = 'eedd1012ab2546fc3c41a0ab3b629ffb';
 
-  // 心跳设置
-  static const int keepAlive = 30; // 缩短心跳间隔，提高连接稳定性
-  static const int pingTimeout = 15; // ping超时时间
+  // 心跳设置 - 延长心跳间隔以提高后台连接稳定性
+  static const int keepAlive = 120; // 2分钟心跳间隔，适合后台运行
+  static const int pingTimeout = 30; // ping超时时间
 
   // QoS设置
   static const int defaultQos = 1;

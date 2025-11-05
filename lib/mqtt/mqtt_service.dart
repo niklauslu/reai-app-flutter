@@ -8,6 +8,7 @@ import 'package:mqtt_client/mqtt_server_client.dart';
 import 'mqtt_config.dart';
 import 'models/mqtt_message.dart';
 import '../services/device_id_service.dart';
+import '../services/background_service_manager.dart';
 
 /// MQTT服务类 (单例)
 class MQTTService {
@@ -32,6 +33,16 @@ class MQTTService {
 
   // 当前状态
   MQTTConnectionStatus get currentStatus => _status;
+
+  /// 初始化MQTT服务
+  Future<void> initialize() async {
+    print('🔧 正在初始化MQTT服务...');
+
+    // 预先获取设备ID
+    await _getDeviceId();
+
+    print('✅ MQTT服务初始化完成');
+  }
 
   /// 获取设备ID
   Future<String> _getDeviceId() async {
@@ -82,12 +93,20 @@ class MQTTService {
       _client!.logging(on: false); // 关闭详细日志以提高性能
       _client!.keepAlivePeriod = MQTTConfig.keepAlive;
 
-      // 设置连接消息 (遗嘱消息需要更复杂的设置，暂时简化)
+      // 设置遗嘱消息
+      final willTopic = MQTTConfig.getDeviceStatusTopic(deviceId);
+      final willMessage = await _getWillMessage(deviceId);
+      print('📝 设置遗嘱消息 - 主题: $willTopic, 内容: $willMessage');
+
+      // 设置连接消息，包含完整的遗嘱消息配置
       final connMessage = MqttConnectMessage()
         ..withClientIdentifier(clientId)
         ..authenticateAs(MQTTConfig.username, MQTTConfig.password)
-        ..withWillQos(MqttQos.atLeastOnce)
-        ..startClean();
+        ..startClean()
+        ..withWillTopic(willTopic)                    // 设置遗嘱消息主题
+        ..withWillMessage(willMessage)                // 设置遗嘱消息内容
+        ..withWillQos(MqttQos.atLeastOnce)            // 设置遗嘱消息QoS为1
+        ..withWillRetain();                           // 设置遗嘱消息保留
 
       _client!.connectionMessage = connMessage;
 
@@ -129,6 +148,19 @@ class MQTTService {
     print('❌ MQTT连接断开');
     _stopConnectionCheck();
     _updateStatus(MQTTConnectionStatus.disconnected);
+
+    // 如果在后台模式，立即尝试重连
+    if (BackgroundServiceManager.isBackgroundMode) {
+      print('🔄 检测到后台连接断开，5秒后自动重连...');
+      Future.delayed(Duration(seconds: 5), () async {
+        try {
+          print('🚀 开始后台重连...');
+          await connect();
+        } catch (e) {
+          print('❌ 后台自动重连失败: $e');
+        }
+      });
+    }
   }
 
   /// 订阅成功回调
@@ -245,6 +277,11 @@ class MQTTService {
 
     final topic = MQTTConfig.getDeviceStatusTopic(_deviceId!);
     await publishMessage(topic, jsonEncode(statusMessage));
+  }
+
+  /// 发送在线状态消息
+  Future<void> sendOnlineStatus() async {
+    await _sendOnlineStatus();
   }
 
   /// 更新连接状态

@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:permission_handler/permission_handler.dart';
+import 'dart:io';
 import 'theme/app_theme.dart';
 import 'components/cards/standard_card.dart';
 import 'components/buttons/app_buttons.dart';
@@ -11,9 +13,26 @@ import 'constants/dimensions.dart';
 import 'mqtt/mqtt_service.dart';
 import 'mqtt/models/mqtt_message.dart';
 import 'services/device_id_service.dart';
+import 'services/background_service_manager.dart';
 import 'dart:async';
 
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  // 初始化MQTT服务
+  final mqttService = MQTTService();
+  await mqttService.initialize();
+
+  // 初始化后台服务管理器（仅Android）
+  if (Platform.isAndroid) {
+    await BackgroundServiceManager.initialize();
+  }
+
+  // 初始化应用生命周期监听
+  final appLifecycleService = AppLifecycleService();
+  appLifecycleService.initialize();
+
+  print('🚀 ReAI Assistant 启动完成');
   runApp(const MyApp());
 }
 
