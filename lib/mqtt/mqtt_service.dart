@@ -2,11 +2,14 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
+import 'dart:typed_data';
+import 'package:typed_data/typed_data.dart';
 import 'package:mqtt_client/mqtt_client.dart';
 import 'package:mqtt_client/mqtt_server_client.dart';
 
 import 'mqtt_config.dart';
 import 'models/mqtt_message.dart';
+import 'models/mqtt_request_response.dart';
 import '../services/device_id_service.dart';
 import '../services/background_service_manager.dart';
 
@@ -31,6 +34,14 @@ class MQTTService {
       StreamController<MQTTTopicMessage>.broadcast();
   Stream<MQTTTopicMessage> get messageStream => _messageController.stream;
 
+  // 请求-响应管理器
+  final MQTTRequestManager _requestManager = MQTTRequestManager();
+
+  // 响应消息流控制器
+  final StreamController<MQTTResponseMessage> _responseController =
+      StreamController<MQTTResponseMessage>.broadcast();
+  Stream<MQTTResponseMessage> get responseStream => _responseController.stream;
+
   // 当前状态
   MQTTConnectionStatus get currentStatus => _status;
 
@@ -40,6 +51,9 @@ class MQTTService {
 
     // 预先获取设备ID
     await _getDeviceId();
+
+    // 设置MQTT发布器到请求管理器
+    MQTTRequestManager.setMqttPublisher(publishMessage);
 
     print('✅ MQTT服务初始化完成');
   }
@@ -188,11 +202,16 @@ class MQTTService {
           final recMess = event[0];
           final topic = recMess.topic;
 
-          // 转换payload为字符串
+          // 转换payload为字符串 - 使用UTF-8解码
           String payload;
           if (recMess.payload is MqttPublishMessage) {
             final publishMessage = recMess.payload as MqttPublishMessage;
-            payload = String.fromCharCodes(publishMessage.payload.message);
+            try {
+              payload = utf8.decode(publishMessage.payload.message);
+            } catch (e) {
+              print('⚠️ UTF-8解码失败，使用默认解码: $e');
+              payload = String.fromCharCodes(publishMessage.payload.message);
+            }
           } else {
             payload = '';
           }
@@ -212,7 +231,101 @@ class MQTTService {
     print('   内容: $payload');
 
     final message = MQTTTopicMessage(topic: topic, payload: payload);
+
+    // 首先发送到普通消息流
     _messageController.add(message);
+
+    // 处理请求-响应逻辑
+    _handleRequestResponseLogic(message);
+  }
+
+  /// 处理请求-响应逻辑
+  void _handleRequestResponseLogic(MQTTTopicMessage message) {
+    try {
+      // 处理响应消息
+      if (message.isResponseTopic) {
+        final response = MQTTResponseMessage.fromTopicMessage(message);
+
+        // 检查是否为待处理请求的响应
+        if (_requestManager.handleResponse(response)) {
+          // 发送到响应流
+          _responseController.add(response);
+          print('✅ 处理响应消息: ${response.method}#${response.id}');
+        } else {
+          print('⚠️ 收到未知请求的响应: ${response.method}#${response.id}');
+        }
+        return;
+      }
+
+      // 处理请求消息
+      if (message.isDeviceRequestTopic) {
+        try {
+          final request = MQTTRequestMessage.fromTopicMessage(message);
+
+          // 注册请求并设置5秒超时
+          _requestManager.registerRequest(request, timeout: Duration(seconds: 5));
+
+          print('🔥 收到请求消息: ${request.method}#${request.id}');
+
+          // 这里可以添加自动处理某些请求的逻辑
+          _handleAutoRequest(request);
+
+        } catch (e) {
+          print('❌ 解析请求消息失败: $e');
+        }
+      }
+    } catch (e) {
+      print('❌ 处理请求-响应逻辑失败: $e');
+    }
+  }
+
+  /// 自动处理某些请求（示例）
+  void _handleAutoRequest(MQTTRequestMessage request) {
+    // 这里可以添加某些请求的自动处理逻辑
+    // 例如：设备状态查询、心跳等
+
+    switch (request.method) {
+      case 'ping':
+        // 自动回复ping请求
+        _sendAutoResponse(request, success: true, message: 'pong', data: {'timestamp': DateTime.now().millisecondsSinceEpoch});
+        break;
+      case 'get_device_status':
+        // 自动回复设备状态
+        _sendAutoResponse(request, success: true, message: '设备正常', data: {
+          'status': 'online',
+          'battery': 85,
+          'signal': 'good',
+        });
+        break;
+      default:
+        // 其他请求不自动处理，等待手动响应
+        print('⏳ 等待手动处理请求: ${request.method}');
+        break;
+    }
+  }
+
+  /// 发送自动响应
+  void _sendAutoResponse(MQTTRequestMessage request, {
+    required bool success,
+    required String message,
+    Map<String, dynamic>? data,
+  }) {
+    try {
+      final response = request.createResponse(
+        success: success,
+        message: message,
+        data: data ?? {},
+      );
+
+      final responseMessage = response.toTopicMessage();
+
+      // 发布响应消息到 device/xxxx/response 主题
+      publishMessage(responseMessage.topic, responseMessage.payload);
+
+      print('🤖 自动回复请求: ${request.method}#${request.id} -> $message');
+    } catch (e) {
+      print('❌ 发送自动响应失败: $e');
+    }
   }
 
   /// 发送消息
@@ -223,13 +336,30 @@ class MQTTService {
     }
 
     try {
-      final builder = MqttClientPayloadBuilder();
-      builder.addString(message);
+      // 使用UTF-8编码确保中文字符正确传输
+      final Uint8Buffer payloadBuffer;
+
+      // 检查消息是否包含非ASCII字符
+      final hasNonAscii = message.codeUnits.any((unit) => unit > 127);
+
+      if (hasNonAscii) {
+        // 对于包含中文的消息，直接使用UTF-8字节数组
+        final utf8Bytes = utf8.encode(message);
+        payloadBuffer = Uint8Buffer();
+        payloadBuffer.addAll(utf8Bytes);
+        print('📝 使用UTF-8字节数组发送中文消息 (${payloadBuffer.length} bytes)');
+      } else {
+        // 对于纯ASCII消息，使用原始方法
+        final builder = MqttClientPayloadBuilder();
+        builder.addString(message);
+        payloadBuffer = builder.payload!;
+        print('📝 使用原始方法发送ASCII消息 (${payloadBuffer.length} bytes)');
+      }
 
       await _client!.publishMessage(
         topic,
         MqttQos.values[MQTTConfig.defaultQos],
-        builder.payload!,
+        payloadBuffer,
       );
 
       print('📤 发送MQTT消息成功:');
@@ -363,9 +493,66 @@ class MQTTService {
     _stopConnectionCheck();
     _messageController.close();
     _statusController.close();
+    _responseController.close();
+    _requestManager.clearAllRequests();
     if (_client != null) {
       _client!.disconnect();
     }
     _client = null;
   }
+
+  /// 发送请求消息
+  Future<void> sendRequest(String method, Map<String, dynamic> params, {String? deviceId}) async {
+    if (_deviceId == null) {
+      print('❌ 设备ID未初始化，无法发送请求');
+      return;
+    }
+
+    final requestId = DateTime.now().millisecondsSinceEpoch.toString();
+    final requestPayload = {
+      'id': requestId,
+      'method': method,
+      'params': params,
+      'deviceId': deviceId ?? _deviceId!,
+      'timestamp': DateTime.now().millisecondsSinceEpoch,
+    };
+
+    final topic = MQTTConfig.getMessageRequestTopic(_deviceId!);
+    await publishMessage(topic, jsonEncode(requestPayload));
+
+    print('📤 发送MQTT请求: $method#$requestId');
+  }
+
+  /// 手动响应请求
+  Future<void> respondToRequest(String requestId, String method, {
+    required bool success,
+    required String message,
+    Map<String, dynamic>? data,
+  }) async {
+    if (_deviceId == null) {
+      print('❌ 设备ID未初始化，无法发送响应');
+      return;
+    }
+
+    final response = MQTTResponseMessage(
+      id: requestId,
+      method: method,
+      success: success,
+      message: message,
+      data: data ?? {},
+      deviceId: _deviceId!,
+      requestId: requestId,
+    );
+
+    final responseMessage = response.toTopicMessage();
+    await publishMessage(responseMessage.topic, responseMessage.payload);
+
+    print('📤 手动发送MQTT响应: $method#$requestId -> $message');
+  }
+
+  /// 获取待处理请求数量
+  int get pendingRequestCount => _requestManager.pendingRequestCount;
+
+  /// 获取待处理请求列表
+  List<MQTTRequestMessage> get pendingRequests => _requestManager.pendingRequests;
 }

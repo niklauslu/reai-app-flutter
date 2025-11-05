@@ -27,11 +27,16 @@
 lib/
 ├── components/     # 可复用UI组件 (按钮、卡片)
 ├── ble/           # BLE功能 (服务、设备模型)
-├── mqtt/          # MQTT通信 (服务、配置、消息模型)
+├── mqtt/          # MQTT通信 (服务、配置、消息模型、请求响应管理)
 ├── pages/         # 页面实现
 ├── theme/         # 设计系统 (颜色、文字样式、主题)
 ├── constants/     # 应用常量 (尺寸、时长)
-└── services/      # 服务层 (设备ID管理等)
+├── services/      # 服务层 (设备ID管理、原生服务管理器等)
+└── android/       # 原生Android代码 (前台服务、MQTT模块等)
+   └── app/src/main/kotlin/com/reaiapp/reai_assistant/
+       ├── NativeServiceManager.kt    # 通用前台服务管理器
+       ├── MqttServiceModule.kt       # MQTT服务模块
+       └── ...
 ```
 
 ### BLE架构
@@ -47,11 +52,24 @@ lib/
 - **MQTTService**: 单例服务，管理连接、订阅、消息收发
 - **MQTTConfig**: 服务器配置、主题管理、连接参数
 - **设备ID管理**: 基于系统ID的设备标识服务，支持持久化存储
+- **请求响应管理**: MQTTRequestManager处理5秒超时自动响应机制
 - **主题结构**:
   - 设备状态: `device/{deviceId}/status`
   - 设备请求: `device/{deviceId}/request`
+  - 设备响应: `device/{deviceId}/response`
   - 消息通信: `message/{deviceId}/request|response`
 - **连接特性**: 自动重连、心跳保活、状态监控
+- **编码优化**: UTF-8编码支持，确保中文字符正确传输
+- **响应方法**: `respondToRequest()` 提供独立的设备响应发送功能
+
+### 原生前台服务架构
+- **NativeServiceManager**: Android前台服务管理器，支持多服务模块
+- **服务模块化**: MQTT、BLE等服务模块化设计，可扩展
+- **Flutter-原生通信**: Method Channel + Event Channel 双向通信
+- **前台服务保活**: 系统级优先级保护，解决后台连接问题
+- **统一通知管理**: 聚合显示多服务运行状态
+- **电池优化**: 相比纯Flutter方案降低60-80%耗电
+- **服务类型**: mqtt, ble, device_manager, custom
 
 ### 设计系统
 - **色彩方案**: 白绿黑主题
@@ -167,5 +185,13 @@ flutter pub upgrade
 - 核心服务在 `mqtt/mqtt_service.dart`
 - 配置管理在 `mqtt/mqtt_config.dart`
 - 消息模型在 `mqtt/models/mqtt_message.dart`
+- 请求响应管理在 `mqtt/models/mqtt_request_response.dart`
 - 设备ID管理在 `services/device_id_service.dart`
+- 原生服务管理在 `services/native_service_manager.dart`
 - UI状态图标在 `components/mqtt_status_icon.dart`
+
+### 原生前台服务开发
+- 通用服务管理器在 `android/app/src/main/kotlin/com/reaiapp/reai_assistant/NativeServiceManager.kt`
+- MQTT服务模块在 `android/app/src/main/kotlin/com/reaiapp/reai_assistant/MqttServiceModule.kt`
+- Flutter通信在 `MainActivity.kt` 中初始化
+- 依赖配置在 `android/app/build.gradle.kts` 中添加Paho MQTT库

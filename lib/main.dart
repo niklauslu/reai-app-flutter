@@ -14,18 +14,47 @@ import 'mqtt/mqtt_service.dart';
 import 'mqtt/models/mqtt_message.dart';
 import 'services/device_id_service.dart';
 import 'services/background_service_manager.dart';
+import 'services/native_service_manager.dart';
 import 'dart:async';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // 初始化MQTT服务
-  final mqttService = MQTTService();
-  await mqttService.initialize();
+  // 获取设备ID服务
+  final deviceIdService = DeviceIdService();
 
-  // 初始化后台服务管理器（仅Android）
+  // 初始化原生服务管理器（仅Android）
   if (Platform.isAndroid) {
-    await BackgroundServiceManager.initialize();
+    try {
+      await nativeServiceManager.initialize();
+      print('✅ 原生服务管理器初始化成功');
+
+      // 启动MQTT原生服务
+      final deviceId = await deviceIdService.getDeviceId();
+      final success = await nativeServiceManager.startMqttService(
+        deviceId: deviceId,
+        server: '14.103.243.230',
+        port: 1883,
+        username: 'device_user',
+        password: 'eedd1012ab2546fc3c41a0ab3b629ffb',
+      );
+
+      if (success) {
+        print('✅ MQTT原生服务启动成功');
+      } else {
+        print('❌ MQTT原生服务启动失败');
+      }
+    } catch (e) {
+      print('❌ 原生服务管理器初始化失败: $e');
+    }
+
+    // 保留原有MQTT服务作为备用
+    final mqttService = MQTTService();
+    await mqttService.initialize();
+  } else {
+    // iOS平台使用原有MQTT服务
+    final mqttService = MQTTService();
+    await mqttService.initialize();
   }
 
   // 初始化应用生命周期监听
