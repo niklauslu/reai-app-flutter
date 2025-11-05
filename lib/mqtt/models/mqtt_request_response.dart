@@ -126,12 +126,28 @@ class MQTTResponseMessage {
 
   /// 转换为MQTT主题消息 - 使用简化格式
   MQTTTopicMessage toTopicMessage() {
+    // 如果有data且是成功响应，则将data内容直接作为result
+    if (success && data.isNotEmpty && !data.containsKey('success')) {
+      final responseJson = {
+        'id': id,
+        'method': method,
+        'result': data, // 直接使用BLE返回的数据作为result
+      };
+
+      return MQTTTopicMessage(
+        topic: 'device/$deviceId/response',
+        payload: jsonEncode(responseJson),
+      );
+    }
+
+    // 否则使用标准格式（错误响应或没有data的情况）
     final responseJson = {
       'id': id,
       'method': method,
       'result': {
         'success': success,
         'message': message,
+        ...(data.isNotEmpty ? data : {}),
       },
     };
 
@@ -195,6 +211,16 @@ class MQTTRequestManager {
     final timer = _timeoutTimers.remove(requestId);
     timer?.cancel();
     print('✅ 移除MQTT请求: $requestId');
+  }
+
+  /// 标记请求已被外部处理完成，不会触发默认回复
+  void markRequestCompleted(String requestId) {
+    if (_pendingRequests.containsKey(requestId)) {
+      _pendingRequests.remove(requestId);
+      final timer = _timeoutTimers.remove(requestId);
+      timer?.cancel();
+      print('✅ MQTT请求已被外部处理完成: $requestId');
+    }
   }
 
   /// 处理响应消息

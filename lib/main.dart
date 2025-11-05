@@ -12,6 +12,8 @@ import 'theme/text_styles.dart';
 import 'constants/dimensions.dart';
 import 'mqtt/mqtt_service.dart';
 import 'mqtt/models/mqtt_message.dart';
+import 'mqtt/models/mqtt_request_response.dart';
+import 'ble/ble_service.dart';
 import 'services/device_id_service.dart';
 import 'services/background_service_manager.dart';
 import 'services/native_service_manager.dart';
@@ -29,34 +31,26 @@ void main() async {
       await nativeServiceManager.initialize();
       print('✅ 原生服务管理器初始化成功');
 
-      // 启动MQTT原生服务
-      final deviceId = await deviceIdService.getDeviceId();
-      final success = await nativeServiceManager.startMqttService(
-        deviceId: deviceId,
-        server: '14.103.243.230',
-        port: 1883,
-        username: 'device_user',
-        password: 'eedd1012ab2546fc3c41a0ab3b629ffb',
-      );
-
-      if (success) {
-        print('✅ MQTT原生服务启动成功');
-      } else {
-        print('❌ MQTT原生服务启动失败');
-      }
+      // 暂时禁用MQTT原生服务启动，避免重复连接问题
+      print('📱 暂时禁用MQTT原生服务，使用Flutter MQTT服务');
+      final success = false;
     } catch (e) {
       print('❌ 原生服务管理器初始化失败: $e');
     }
 
-    // 保留原有MQTT服务作为备用
+    // 使用Flutter MQTT服务
+    print('📱 使用Flutter MQTT服务');
     final mqttService = MQTTService();
     await mqttService.initialize();
+    print('✅ Flutter MQTT服务初始化成功');
   } else {
     // iOS平台使用原有MQTT服务
     final mqttService = MQTTService();
     await mqttService.initialize();
+    print('✅ iOS MQTT服务初始化成功');
   }
 
+  
   // 初始化应用生命周期监听
   final appLifecycleService = AppLifecycleService();
   appLifecycleService.initialize();
@@ -91,25 +85,26 @@ class MyHomePage extends StatefulWidget {
 
 class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
   late TabController _tabController;
-  final MQTTService _mqttService = MQTTService();
   final DeviceIdService _deviceIdService = DeviceIdService();
-  late StreamSubscription<MQTTTopicMessage> _messageSubscription;
+  final MQTTService _mqttService = MQTTService();
+  final BLEService _bleService = BLEService();
 
   String? _deviceId;
   String? _formattedDeviceId;
+  StreamSubscription<MQTTRequestMessage>? _mqttRequestSubscription;
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 4, vsync: this);
     _initDeviceId();
-    _initMQTT();
+    _setupMqttRequestListener();
   }
 
   @override
   void dispose() {
     _tabController.dispose();
-    _messageSubscription.cancel();
+    _mqttRequestSubscription?.cancel();
     super.dispose();
   }
 
@@ -124,8 +119,6 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
         _formattedDeviceId = formattedId;
       });
 
-      // 初始化MQTT连接
-      _mqttService.connect();
 
       print('✅ 设备ID初始化完成: $_formattedDeviceId');
     } catch (e) {
@@ -133,14 +126,84 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     }
   }
 
-  /// 初始化MQTT
-  void _initMQTT() {
-    // 监听MQTT消息
-    _messageSubscription = _mqttService.messageStream.listen((message) {
-      print('收到MQTT消息: ${message.toString()}');
+  /// 设置MQTT请求监听器
+  void _setupMqttRequestListener() {
+    print('🔧 [MQTT回调] 设置MQTT请求监听器...');
+
+    _mqttRequestSubscription = _mqttService.requestStream.listen((request) {
+      print('📨 [MQTT回调] 收到请求消息:');
+      print('   📋 ID: ${request.id}');
+      print('   🔧 方法: ${request.method}');
+      print('   📱 设备ID: ${request.deviceId}');
+      print('   📦 参数: ${request.params}');
+      print('   ⏰ 时间戳: ${request.timestamp}');
+
+      // 处理BLE请求
+      _handleMqttRequest(request);
     });
+
+    print('✅ [MQTT回调] MQTT请求监听器设置完成');
   }
 
+  /// 处理MQTT请求
+  Future<void> _handleMqttRequest(MQTTRequestMessage request) async {
+    print('🔧 [MQTT处理] 开始处理请求: ${request.method}#${request.id}');
+
+    try {
+      // 调用BLE服务的handleRequest方法
+      final result = await _bleService.handleRequest(request.method, request.params);
+
+      if (result != null) {
+        print('✅ [MQTT处理] BLE处理成功:');
+        print('   成功: ${result['success']}');
+        print('   消息: ${result['message']}');
+        print('   数据: ${result['data']}');
+
+        // 发送MQTT响应
+        await _mqttService.respondToRequest(
+          request.id,
+          request.method,
+          success: result['success'],
+          message: result['message'],
+          data: result['data'] != null ? result["data"] : null,
+        );
+
+        // 标记MQTT请求已处理完成，防止5秒超时默认回复
+        _mqttService.markRequestCompleted(request.id, request.method);
+
+        print('📤 [MQTT处理] 响应已发送，请求已标记为完成');
+      } else {
+        print('❌ [MQTT处理] BLE处理返回null结果');
+
+        // 发送失败响应
+        await _mqttService.respondToRequest(
+          request.id,
+          request.method,
+          success: false,
+          message: 'BLE处理失败：返回结果为空',
+        );
+
+        // 即使失败也标记请求已处理完成，防止默认回复
+        _mqttService.markRequestCompleted(request.id, request.method);
+      }
+    } catch (e) {
+      print('💥 [MQTT处理] 处理异常: $e');
+
+      // 发送异常响应
+      await _mqttService.respondToRequest(
+        request.id,
+        request.method,
+        success: false,
+        message: '处理请求异常: $e',
+      );
+
+      // 即使异常也标记请求已处理完成，防止默认回复
+      _mqttService.markRequestCompleted(request.id, request.method);
+    }
+  }
+
+  
+  
   /// 显示MQTT状态对话框
   void _showMQTTStatus(BuildContext context) {
     showDialog(
@@ -149,8 +212,8 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
         return AlertDialog(
           title: const Text('MQTT连接状态'),
           content: StreamBuilder<MQTTConnectionStatus>(
-            stream: _mqttService.statusStream,
-            initialData: _mqttService.currentStatus,
+            stream: MQTTService().statusStream,
+            initialData: MQTTService().currentStatus,
             builder: (context, snapshot) {
               final status = snapshot.data ?? MQTTConnectionStatus.disconnected;
 
@@ -216,7 +279,7 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
                     ElevatedButton.icon(
                       onPressed: () {
                         Navigator.pop(context);
-                        _mqttService.connect();
+                        MQTTService().connect();
                       },
                       icon: const Icon(Icons.refresh),
                       label: const Text('重新连接'),
@@ -229,7 +292,7 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
                     TextButton.icon(
                       onPressed: () {
                         Navigator.pop(context);
-                        _mqttService.disconnect();
+                        MQTTService().disconnect();
                       },
                       icon: const Icon(Icons.power_settings_new),
                       label: const Text('断开连接'),

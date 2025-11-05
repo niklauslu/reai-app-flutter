@@ -24,6 +24,10 @@ class MQTTService {
   String? _deviceId;
   Timer? _connectionCheckTimer;
 
+  // 已处理的请求ID集合 - 用于防止重复处理
+  final Set<String> _processedRequestIds = {};
+  Timer? _cleanupTimer;
+
   // 连接状态流控制器
   final StreamController<MQTTConnectionStatus> _statusController =
       StreamController<MQTTConnectionStatus>.broadcast();
@@ -41,6 +45,11 @@ class MQTTService {
   final StreamController<MQTTResponseMessage> _responseController =
       StreamController<MQTTResponseMessage>.broadcast();
   Stream<MQTTResponseMessage> get responseStream => _responseController.stream;
+
+  // 请求消息流控制器 - 用于外部处理请求
+  final StreamController<MQTTRequestMessage> _requestController =
+      StreamController<MQTTRequestMessage>.broadcast();
+  Stream<MQTTRequestMessage> get requestStream => _requestController.stream;
 
   // 当前状态
   MQTTConnectionStatus get currentStatus => _status;
@@ -155,12 +164,16 @@ class MQTTService {
 
     // 启动连接检查
     _startConnectionCheck();
+
+    // 启动清理定时器 - 每5分钟清理一次过期的请求ID
+    _startCleanupTimer();
   }
 
   /// 连接断开回调
   void _onDisconnected() {
     print('❌ MQTT连接断开');
     _stopConnectionCheck();
+    _stopCleanupTimer();
     _updateStatus(MQTTConnectionStatus.disconnected);
 
     // 如果在后台模式，立即尝试重连
@@ -261,14 +274,23 @@ class MQTTService {
       if (message.isDeviceRequestTopic) {
         try {
           final request = MQTTRequestMessage.fromTopicMessage(message);
+          final requestKey = '${request.id}_${request.method}';
+
+          // 检查是否为重复请求ID
+          if (_processedRequestIds.contains(requestKey)) {
+            print('⚠️ 检测到重复请求ID，跳过处理: ${request.method}#${request.id}');
+            return;
+          }
+
+          // 标记请求ID为已处理
+          _processedRequestIds.add(requestKey);
+          print('🔥 收到新请求消息: ${request.method}#${request.id}');
 
           // 注册请求并设置5秒超时
           _requestManager.registerRequest(request, timeout: Duration(seconds: 5));
 
-          print('🔥 收到请求消息: ${request.method}#${request.id}');
-
-          // 这里可以添加自动处理某些请求的逻辑
-          _handleAutoRequest(request);
+          // 将请求消息发送到流中，由外部组件处理
+          _requestController.add(request);
 
         } catch (e) {
           print('❌ 解析请求消息失败: $e');
@@ -279,55 +301,7 @@ class MQTTService {
     }
   }
 
-  /// 自动处理某些请求（示例）
-  void _handleAutoRequest(MQTTRequestMessage request) {
-    // 这里可以添加某些请求的自动处理逻辑
-    // 例如：设备状态查询、心跳等
-
-    switch (request.method) {
-      case 'ping':
-        // 自动回复ping请求
-        _sendAutoResponse(request, success: true, message: 'pong', data: {'timestamp': DateTime.now().millisecondsSinceEpoch});
-        break;
-      case 'get_device_status':
-        // 自动回复设备状态
-        _sendAutoResponse(request, success: true, message: '设备正常', data: {
-          'status': 'online',
-          'battery': 85,
-          'signal': 'good',
-        });
-        break;
-      default:
-        // 其他请求不自动处理，等待手动响应
-        print('⏳ 等待手动处理请求: ${request.method}');
-        break;
-    }
-  }
-
-  /// 发送自动响应
-  void _sendAutoResponse(MQTTRequestMessage request, {
-    required bool success,
-    required String message,
-    Map<String, dynamic>? data,
-  }) {
-    try {
-      final response = request.createResponse(
-        success: success,
-        message: message,
-        data: data ?? {},
-      );
-
-      final responseMessage = response.toTopicMessage();
-
-      // 发布响应消息到 device/xxxx/response 主题
-      publishMessage(responseMessage.topic, responseMessage.payload);
-
-      print('🤖 自动回复请求: ${request.method}#${request.id} -> $message');
-    } catch (e) {
-      print('❌ 发送自动响应失败: $e');
-    }
-  }
-
+  
   /// 发送消息
   Future<void> publishMessage(String topic, String message) async {
     if (_client?.connectionStatus?.state != MqttConnectionState.connected) {
@@ -488,13 +462,47 @@ class MQTTService {
     _connectionCheckTimer = null;
   }
 
+  /// 启动清理定时器 - 定期清理过期的请求ID以防止内存泄漏
+  void _startCleanupTimer() {
+    _cleanupTimer?.cancel();
+    _cleanupTimer = Timer.periodic(Duration(minutes: 5), (timer) {
+      _cleanupExpiredRequestIds();
+    });
+    print('🧹 启动请求ID清理定时器 (每5分钟清理一次)');
+  }
+
+  /// 停止清理定时器
+  void _stopCleanupTimer() {
+    _cleanupTimer?.cancel();
+    _cleanupTimer = null;
+  }
+
+  /// 清理过期的请求ID (清理超过10分钟的记录)
+  void _cleanupExpiredRequestIds() {
+    if (_processedRequestIds.isEmpty) return;
+
+    final currentTime = DateTime.now().millisecondsSinceEpoch;
+    final expiredThreshold = currentTime - (10 * 60 * 1000); // 10分钟前
+
+    // 由于我们只存储ID没有时间戳，采用简单的集合大小限制策略
+    // 如果集合大小超过500个，清空一半以防止内存泄漏
+    if (_processedRequestIds.length > 500) {
+      final idsToRemove = _processedRequestIds.take(250).toSet();
+      _processedRequestIds.removeAll(idsToRemove);
+      print('🧹 清理了${idsToRemove.length}个过期的请求ID，当前剩余${_processedRequestIds.length}个');
+    }
+  }
+
   /// 销毁服务
   void dispose() {
     _stopConnectionCheck();
+    _stopCleanupTimer();
     _messageController.close();
     _statusController.close();
     _responseController.close();
+    _requestController.close();
     _requestManager.clearAllRequests();
+    _processedRequestIds.clear();
     if (_client != null) {
       _client!.disconnect();
     }
@@ -555,4 +563,10 @@ class MQTTService {
 
   /// 获取待处理请求列表
   List<MQTTRequestMessage> get pendingRequests => _requestManager.pendingRequests;
+
+  /// 标记请求已被外部处理完成，不会触发5秒超时默认回复
+  void markRequestCompleted(String requestId, String method) {
+    final requestKey = '${requestId}_${method}';
+    _requestManager.markRequestCompleted(requestKey);
+  }
 }
