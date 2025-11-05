@@ -11,9 +11,12 @@
 **核心功能**:
 - BLE设备扫描和连接管理
 - 硬件设备分类 (DYJ V1/V2, DYJ Card, ReAI Glass)
+- DYJV2设备协议通信 (CMD:JSON格式)
 - AI助手界面 (UI已完成，后端集成待实现)
 - 硬件产品展示和管理
 - MQTT实时通信和设备状态管理
+- 远程设备控制 (MQTT-BLE集成)
+- 重复请求防护和响应管理
 
 ## 架构设计
 
@@ -41,18 +44,21 @@ lib/
 
 ### BLE架构
 - **BLEService**: 单例服务，管理扫描、连接、权限
+- **BLEProtocolHandler**: DYJV2设备专用协议处理器，支持CMD:JSON格式通信
 - **设备类型**: 根据设备名称模式自动分类
   - `DYJ-*` → dyjV1 (第一代)
-  - `DYJV2_*` → dyjV2 (第二代)
+  - `DYJV2_*` → dyjV2 (第二代，支持协议通信)
   - `*Card*` → dyjCard
   - `*ReAI*/*Glass*` → reaiGlass
   - 其他 → other
+- **协议支持**: DYJV2设备支持完整的CMD:JSON协议栈，包括MTU协商、响应等待、超时处理
 
 ### MQTT架构
 - **MQTTService**: 单例服务，管理连接、订阅、消息收发
 - **MQTTConfig**: 服务器配置、主题管理、连接参数
 - **设备ID管理**: 基于系统ID的设备标识服务，支持持久化存储
 - **请求响应管理**: MQTTRequestManager处理5秒超时自动响应机制
+- **重复请求防护**: 防止网络重传或客户端重试导致的重复执行
 - **主题结构**:
   - 设备状态: `device/{deviceId}/status`
   - 设备请求: `device/{deviceId}/request`
@@ -61,6 +67,7 @@ lib/
 - **连接特性**: 自动重连、心跳保活、状态监控
 - **编码优化**: UTF-8编码支持，确保中文字符正确传输
 - **响应方法**: `respondToRequest()` 提供独立的设备响应发送功能
+- **请求完成标记**: `markRequestCompleted()` 防止5秒超时默认回复
 
 ### 原生前台服务架构
 - **NativeServiceManager**: Android前台服务管理器，支持多服务模块
@@ -131,10 +138,12 @@ flutter pub upgrade
 ## 核心实现细节
 
 ### BLE设备管理
-- **扫描**: 5秒超时，智能设备过滤
+- **扫描**: 5秒超时，智能设备过滤，信号强度排序
 - **过滤**: 移除空名称、MAC地址和位置跟踪设备
-- **连接**: 基于流的连接状态管理，生命周期处理正确
+- **连接**: 单设备连接管理，支持协议初始化
+- **协议通信**: DYJV2设备支持CMD:JSON格式，MTU协商，响应等待
 - **UI**: 设备卡片显示MAC地址、信号强度、连接状态
+- **设备详情**: 完整的设备信息页面，支持协议通信监控
 
 ### 组件系统
 - **按钮**: PrimaryButton (填充), SecondaryButton (边框), TextButtonWidget
@@ -146,6 +155,9 @@ flutter pub upgrade
 - **错误处理**: 权限和连接问题的用户友好错误对话框
 - **状态更新**: setState()调用前的mounted检查
 - **资源生成**: 通过flutter_launcher_icons插件管理图标
+- **请求处理**: BLE服务handleRequest通用方法，支持超时和响应等待
+- **重复防护**: MQTT请求ID去重机制，防止重复执行
+- **响应控制**: 外部处理完成后标记请求完成，避免默认回复
 
 ## 开发注意事项
 
@@ -162,6 +174,8 @@ flutter pub upgrade
 - BLE扫描限制为5秒以保护电池
 - 流订阅正确管理以防止内存泄漏
 - 实现设备过滤以减少UI噪音
+- MQTT请求ID缓存限制500个，定期清理防止内存泄漏
+- BLE协议响应等待超时5秒，避免长时间阻塞
 
 ## 常见开发任务
 
@@ -179,7 +193,9 @@ flutter pub upgrade
 ### BLE功能开发
 - 核心逻辑在 `ble/ble_service.dart`
 - 设备模型在 `ble/ble_device_model.dart`
+- 协议处理器在 `ble/ble_protocol_handler.dart`
 - UI实现在 `pages/ble_device_list_page.dart`
+- 设备详情页在 `pages/ble_device_detail_page.dart`
 
 ### MQTT功能开发
 - 核心服务在 `mqtt/mqtt_service.dart`
@@ -195,3 +211,50 @@ flutter pub upgrade
 - MQTT服务模块在 `android/app/src/main/kotlin/com/reaiapp/reai_assistant/MqttServiceModule.kt`
 - Flutter通信在 `MainActivity.kt` 中初始化
 - 依赖配置在 `android/app/build.gradle.kts` 中添加Paho MQTT库
+
+## 版本历史
+
+### v1.2.0 (当前版本) - MQTT重复防护和BLE集成优化
+**提交**: e3aad34
+**新增功能**:
+- MQTT重复请求ID防护机制
+- BLE请求完成标记系统，防止5秒超时默认回复
+- DYJV2设备完整协议处理器 (BLEProtocolHandler)
+- MQTT-BLE集成架构，支持远程设备控制
+- 设备详情页面，支持协议通信监控
+- 统一的响应格式和错误处理
+
+**技术改进**:
+- 请求去重：使用Set存储已处理请求ID
+- 内存管理：定时清理机制防止长期运行的内存泄漏
+- 响应控制：外部处理完成后立即标记请求，防止默认回复
+- 协议支持：完整的DYJV2设备协议栈实现
+- 调试支持：详细的日志输出便于开发和故障排查
+
+### v1.1.0 - MQTT实时通信和设备管理
+**提交**: 6c57c3e
+**核心功能**:
+- MQTT服务完整实现
+- 设备在线状态管理
+- 请求响应机制
+- 自动重连和心跳保活
+
+### v1.0.1 - MQTT后台运行版本
+**提交**: 86126d8
+**改进**:
+- 后台模式MQTT服务支持
+- 原生前台服务集成
+- 连接稳定性优化
+
+### MQTT-BLE集成开发
+- MQTT请求处理在 `main.dart` 中的 `_handleMqttRequest()` 方法
+- BLE通用请求处理在 `ble/ble_service.dart` 的 `handleRequest()` 方法
+- 重复请求防护在 `mqtt/mqtt_service.dart` 和 `mqtt/models/mqtt_request_response.dart`
+- 响应完成标记在 `MQTTRequestManager.markRequestCompleted()` 方法
+
+### BLE协议通信开发
+- DYJV2协议处理器在 `ble/ble_protocol_handler.dart`
+- CMD:JSON格式消息解析和发送
+- MTU协商和数据包分片处理
+- 设备响应等待和超时机制
+- 协议状态监控和错误处理
