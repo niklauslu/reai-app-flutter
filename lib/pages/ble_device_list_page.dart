@@ -26,11 +26,13 @@ class _BLEDeviceListPageState extends State<BLEDeviceListPage> {
   bool _isScanning = false;
   String _statusMessage = '准备就绪';
   bool _isInitialized = false;
+  BLEDeviceModel? _currentConnectedDevice; // 当前连接的设备
 
   // Stream subscriptions
   StreamSubscription? _scanningSubscription;
   StreamSubscription? _devicesSubscription;
   StreamSubscription? _statusSubscription;
+  StreamSubscription? _connectionStateSubscription;
 
   @override
   void initState() {
@@ -45,6 +47,7 @@ class _BLEDeviceListPageState extends State<BLEDeviceListPage> {
     _scanningSubscription?.cancel();
     _devicesSubscription?.cancel();
     _statusSubscription?.cancel();
+    _connectionStateSubscription?.cancel();
 
     // 停止扫描
     _bleService.stopScan();
@@ -122,6 +125,20 @@ class _BLEDeviceListPageState extends State<BLEDeviceListPage> {
         });
       }
     });
+
+    // 监听连接状态变化
+    _connectionStateSubscription = _bleService.connectionStateStream.listen((connectedDevice) {
+      if (mounted) {
+        setState(() {
+          _currentConnectedDevice = connectedDevice;
+        });
+      }
+    });
+
+    // 初始化时获取当前连接设备
+    setState(() {
+      _currentConnectedDevice = _bleService.currentConnectedDeviceModel;
+    });
   }
 
   /// 切换扫描状态
@@ -140,6 +157,11 @@ class _BLEDeviceListPageState extends State<BLEDeviceListPage> {
 
   /// 导航到设备详情页
   Future<void> _navigateToDeviceDetail(BLEDeviceModel device) async {
+    // 进入详情页前停止扫描以节省电量
+    if (_isScanning) {
+      await _bleService.stopScan();
+    }
+
     await Navigator.push(
       context,
       MaterialPageRoute(
@@ -300,42 +322,420 @@ class _BLEDeviceListPageState extends State<BLEDeviceListPage> {
       );
     }
 
-    if (_devices.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              Icons.bluetooth_disabled,
-              size: AppDimensions.iconXLarge * 2,
-              color: AppColors.gray300,
-            ),
-            const SizedBox(height: AppDimensions.md),
-            Text(
-              '未发现设备',
-              style: AppTextStyles.headline3,
-            ),
-            const SizedBox(height: AppDimensions.sm),
-            Text(
-              _isScanning ? '正在搜索设备...' : '点击扫描按钮开始搜索',
-              style: AppTextStyles.bodyText2.copyWith(
-                color: AppColors.gray600,
-              ),
-            ),
-          ],
-        ),
-      );
+    // 获取已连接设备（优先显示BLE服务维护的当前连接设备）
+    final connectedDevices = <BLEDeviceModel>[];
+    final unconnectedDevices = <BLEDeviceModel>[];
+
+    // 如果有当前连接设备，添加到已连接列表
+    if (_currentConnectedDevice != null) {
+      connectedDevices.add(_currentConnectedDevice!);
+    }
+
+    // 处理扫描到的设备
+    for (final device in _devices) {
+      // 跳过已经在连接列表中的设备
+      if (connectedDevices.any((connected) => connected.id == device.id)) {
+        continue;
+      }
+
+      // 检查设备连接状态（处理其他可能连接但不是当前连接的设备）
+      if (_bleService.isDeviceConnected(device.id)) {
+        connectedDevices.add(device);
+      } else {
+        unconnectedDevices.add(device);
+      }
     }
 
     return RefreshIndicator(
       onRefresh: _refreshDevices,
-      child: ListView.builder(
-        padding: const EdgeInsets.all(AppDimensions.md),
-        itemCount: _devices.length,
-        itemBuilder: (context, index) {
-          final device = _devices[index];
-          return _buildDeviceCard(device);
-        },
+      child: CustomScrollView(
+        slivers: [
+          // 已连接设备区域
+          if (connectedDevices.isNotEmpty) ...[
+            SliverToBoxAdapter(
+              child: Container(
+                margin: const EdgeInsets.fromLTRB(AppDimensions.md, AppDimensions.md, AppDimensions.md, AppDimensions.sm),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(
+                          Icons.bluetooth_connected,
+                          color: AppColors.primaryGreen,
+                          size: 20,
+                        ),
+                        const SizedBox(width: AppDimensions.xs),
+                        Text(
+                          '已连接设备',
+                          style: AppTextStyles.headline3.copyWith(
+                            color: AppColors.primaryGreen,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const Spacer(),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: AppDimensions.sm,
+                            vertical: 4,
+                          ),
+                          decoration: BoxDecoration(
+                            color: AppColors.primaryGreen.withOpacity(0.1),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Text(
+                            '${connectedDevices.length}台',
+                            style: AppTextStyles.caption.copyWith(
+                              color: AppColors.primaryGreen,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: AppDimensions.sm),
+                    Text(
+                      '点击设备可查看详情和管理连接',
+                      style: AppTextStyles.caption.copyWith(
+                        color: AppColors.gray600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            // 已连接设备列表
+            SliverList(
+              delegate: SliverChildBuilderDelegate(
+                (context, index) {
+                  final device = connectedDevices[index];
+                  return Container(
+                    margin: const EdgeInsets.fromLTRB(AppDimensions.md, 0, AppDimensions.md, AppDimensions.sm),
+                    child: _buildConnectedDeviceCard(device),
+                  );
+                },
+                childCount: connectedDevices.length,
+              ),
+            ),
+            // 分割线
+            SliverToBoxAdapter(
+              child: Container(
+                margin: const EdgeInsets.symmetric(vertical: AppDimensions.lg),
+                padding: const EdgeInsets.symmetric(horizontal: AppDimensions.md),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Container(
+                        height: 1,
+                        color: AppColors.gray200,
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: AppDimensions.md),
+                      child: Text(
+                        '其他设备',
+                        style: AppTextStyles.caption.copyWith(
+                          color: AppColors.gray500,
+                        ),
+                      ),
+                    ),
+                    Expanded(
+                      child: Container(
+                        height: 1,
+                        color: AppColors.gray200,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+
+          // 未连接设备列表
+          if (unconnectedDevices.isNotEmpty)
+            SliverList(
+              delegate: SliverChildBuilderDelegate(
+                (context, index) {
+                  final device = unconnectedDevices[index];
+                  return Container(
+                    margin: const EdgeInsets.fromLTRB(AppDimensions.md, 0, AppDimensions.md, AppDimensions.sm),
+                    child: _buildDeviceCard(device),
+                  );
+                },
+                childCount: unconnectedDevices.length,
+              ),
+            ),
+
+          // 空状态
+          if (connectedDevices.isEmpty && unconnectedDevices.isEmpty)
+            SliverFillRemaining(
+              hasScrollBody: false,
+              child: Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      Icons.bluetooth_disabled,
+                      size: AppDimensions.iconXLarge * 2,
+                      color: AppColors.gray300,
+                    ),
+                    const SizedBox(height: AppDimensions.md),
+                    Text(
+                      '未发现设备',
+                      style: AppTextStyles.headline3,
+                    ),
+                    const SizedBox(height: AppDimensions.sm),
+                    Text(
+                      _isScanning ? '正在搜索设备...' : '点击扫描按钮开始搜索',
+                      style: AppTextStyles.bodyText2.copyWith(
+                        color: AppColors.gray600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  /// 构建已连接设备卡片（特殊样式）
+  Widget _buildConnectedDeviceCard(BLEDeviceModel device) {
+    return StandardCard(
+      margin: EdgeInsets.zero, // 外部已经控制了margin
+      onTap: () => _navigateToDeviceDetail(device),
+      border: Border.all(
+        color: AppColors.primaryGreen.withOpacity(0.3),
+        width: 2,
+      ),
+      child: Row(
+        children: [
+          // 设备图标 - 带连接状态指示
+          Container(
+            width: 56,
+            height: 56,
+            decoration: BoxDecoration(
+              color: AppColors.primaryGreen.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(AppDimensions.smallCardRadius),
+              border: Border.all(color: AppColors.primaryGreen, width: 2),
+            ),
+            child: Stack(
+              children: [
+                Center(
+                  child: Icon(
+                    _getDeviceIcon(device.type),
+                    size: AppDimensions.iconLarge + 4,
+                    color: AppColors.primaryGreen,
+                  ),
+                ),
+                // 连接状态点
+                Positioned(
+                  right: 2,
+                  top: 2,
+                  child: Container(
+                    width: 12,
+                    height: 12,
+                    decoration: BoxDecoration(
+                      color: Colors.green,
+                      shape: BoxShape.circle,
+                      border: Border.all(color: Colors.white, width: 2),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: AppDimensions.md),
+
+          // 设备信息
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Text(
+                      device.name,
+                      style: AppTextStyles.headline4.copyWith(
+                        color: AppColors.primaryGreen,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(width: AppDimensions.xs),
+                    // 已连接标识
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: AppDimensions.xs,
+                        vertical: 2,
+                      ),
+                      decoration: BoxDecoration(
+                        color: AppColors.primaryGreen,
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.check_circle,
+                            size: 10,
+                            color: Colors.white,
+                          ),
+                          const SizedBox(width: 2),
+                          Text(
+                            '已连接',
+                            style: AppTextStyles.overline.copyWith(
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const Spacer(),
+                    // 快捷操作按钮 - 只保留详情按钮
+                    Container(
+                      decoration: BoxDecoration(
+                        color: AppColors.primaryGreen.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      child: _buildQuickAction(
+                        icon: Icons.info_outline,
+                        tooltip: '查看详情',
+                        onTap: () => _navigateToDeviceDetail(device),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: AppDimensions.xs),
+                Text(
+                  'MAC: ${device.id}',
+                  style: AppTextStyles.caption.copyWith(
+                    color: AppColors.gray600,
+                  ),
+                ),
+                const SizedBox(height: AppDimensions.xs),
+                Row(
+                  children: [
+                    Icon(
+                      Icons.signal_cellular_alt,
+                      size: AppDimensions.iconSmall,
+                      color: _getSignalColor(device.rssi),
+                    ),
+                    const SizedBox(width: AppDimensions.xs),
+                    Text(
+                      '${device.rssi} dBm • ${device.signalStrength}',
+                      style: AppTextStyles.caption.copyWith(
+                        color: AppColors.gray600,
+                      ),
+                    ),
+                    const SizedBox(width: AppDimensions.sm),
+                    // 协议状态（仅DYJV2设备）
+                    if (device.type == DeviceType.dyjV2 && _bleService.isProtocolConnected) ...[
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 6,
+                          vertical: 2,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.blue.withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: Colors.blue.withOpacity(0.3)),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              Icons.chat,
+                              size: 10,
+                              color: Colors.blue,
+                            ),
+                            const SizedBox(width: 2),
+                            Text(
+                              '协议',
+                              style: AppTextStyles.overline.copyWith(
+                                color: Colors.blue,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 构建快捷操作按钮
+  Widget _buildQuickAction({
+    required IconData icon,
+    required String tooltip,
+    required VoidCallback onTap,
+    bool isDestructive = false,
+  }) {
+    return Tooltip(
+      message: tooltip,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(16),
+        child: Container(
+          width: 32,
+          height: 32,
+          decoration: BoxDecoration(
+            color: isDestructive
+                ? Colors.red.withOpacity(0.1)
+                : AppColors.primaryGreen.withOpacity(0.1),
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: Icon(
+            icon,
+            size: 16,
+            color: isDestructive
+                ? Colors.red
+                : AppColors.primaryGreen,
+          ),
+        ),
+      ),
+    );
+  }
+
+  
+  /// 显示成功消息
+  void _showSuccessMessage(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Row(
+          children: [
+            Icon(Icons.check_circle, color: Colors.white, size: 20),
+            SizedBox(width: 8),
+            Text(message),
+          ],
+        ),
+        backgroundColor: AppColors.primaryGreen,
+        duration: Duration(seconds: 2),
+      ),
+    );
+  }
+
+  /// 显示错误消息
+  void _showErrorMessage(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Row(
+          children: [
+            Icon(Icons.error_outline, color: Colors.white, size: 20),
+            SizedBox(width: 8),
+            Text(message),
+          ],
+        ),
+        backgroundColor: AppColors.errorRed,
+        duration: Duration(seconds: 3),
       ),
     );
   }
@@ -343,7 +743,7 @@ class _BLEDeviceListPageState extends State<BLEDeviceListPage> {
   /// 构建设备卡片
   Widget _buildDeviceCard(BLEDeviceModel device) {
     // 检查设备是否为当前连接的设备
-    bool isConnected = _bleService.isDeviceConnected(device.id);
+    bool isConnected = _bleService.isDeviceConnected(device.id) && _currentConnectedDevice?.id != device.id;
 
     return StandardCard(
       margin: const EdgeInsets.only(bottom: AppDimensions.sm),

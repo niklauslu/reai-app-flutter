@@ -24,16 +24,26 @@ class BLEService {
   final StreamController<String> _statusController = StreamController<String>.broadcast();
   final StreamController<Map<String, dynamic>> _protocolMessageController = StreamController<Map<String, dynamic>>.broadcast();
 
+  // 连接状态变化流控制器
+  final StreamController<BLEDeviceModel?> _connectionStateController = StreamController<BLEDeviceModel?>.broadcast();
+
   bool get isScanning => _isScanning;
   List<BLEDeviceModel> get scannedDevices => List.unmodifiable(_scannedDevices);
   BluetoothDevice? get currentConnectedDevice => _currentConnectedDevice;
   List<BluetoothDevice> get connectedDevices => _currentConnectedDevice != null ? [_currentConnectedDevice!] : [];
   BLEProtocolHandler? get protocolHandler => _protocolHandler;
 
+  /// 获取当前连接设备的BLE设备模型
+  BLEDeviceModel? get currentConnectedDeviceModel {
+    if (_currentConnectedDevice == null) return null;
+    return BLEDeviceModel.fromConnectedDevice(_currentConnectedDevice!);
+  }
+
   Stream<bool> get isScanningStream => _isScanningController.stream;
   Stream<List<BLEDeviceModel>> get devicesStream => _devicesController.stream;
   Stream<String> get statusStream => _statusController.stream;
   Stream<Map<String, dynamic>> get protocolMessageStream => _protocolMessageController.stream;
+  Stream<BLEDeviceModel?> get connectionStateStream => _connectionStateController.stream;
 
   /// 初始化BLE
   Future<bool> initialize() async {
@@ -390,6 +400,9 @@ class BLEService {
 
       _updateDeviceList();
 
+      // 发送连接状态变化通知
+      _connectionStateController.add(currentConnectedDeviceModel);
+
       debugPrint(msg);
       _statusController.add(msg);
       return true;
@@ -430,6 +443,9 @@ class BLEService {
       debugPrint('✅ 设备断开成功: ${device.name}');
       _updateDeviceList();
 
+      // 发送连接状态变化通知
+      _connectionStateController.add(null);
+
       String msg = '👋 已断开 ${device.name}';
       debugPrint(msg);
       _statusController.add(msg);
@@ -450,10 +466,14 @@ class BLEService {
       if (devices.isNotEmpty) {
         _currentConnectedDevice = devices.first;
         debugPrint('✅ 发现已连接设备: ${_currentConnectedDevice!.name}');
+        // 发送连接状态变化通知
+        _connectionStateController.add(currentConnectedDeviceModel);
       } else {
         if (_currentConnectedDevice != null) {
           debugPrint('⚠️ 本地有连接记录但系统显示无连接，清除本地记录');
           _currentConnectedDevice = null;
+          // 发送连接状态变化通知
+          _connectionStateController.add(null);
         }
       }
 
@@ -704,6 +724,7 @@ class BLEService {
     _devicesController.close();
     _statusController.close();
     _protocolMessageController.close();
+    _connectionStateController.close();
 
     debugPrint('✅ BLE服务资源清理完成');
   }
