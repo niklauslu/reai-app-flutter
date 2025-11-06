@@ -1,12 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:permission_handler/permission_handler.dart';
 import 'dart:io';
 import 'theme/app_theme.dart';
 import 'components/cards/standard_card.dart';
 import 'components/buttons/app_buttons.dart';
 import 'components/mqtt_status_icon.dart';
+import 'components/permission_status_banner.dart';
 import 'pages/ble_device_list_page.dart';
+import 'pages/loading_page.dart';
 import 'theme/colors.dart';
 import 'theme/text_styles.dart';
 import 'constants/dimensions.dart';
@@ -17,6 +18,8 @@ import 'ble/ble_service.dart';
 import 'services/device_id_service.dart';
 import 'services/background_service_manager.dart';
 import 'services/native_service_manager.dart';
+import 'services/ios_background_service.dart';
+import 'services/app_permission_service.dart';
 import 'dart:async';
 
 void main() async {
@@ -44,13 +47,18 @@ void main() async {
     await mqttService.initialize();
     print('✅ Flutter MQTT服务初始化成功');
   } else {
-    // iOS平台使用原有MQTT服务
+    // iOS平台使用统一的MQTT服务
     final mqttService = MQTTService();
     await mqttService.initialize();
     print('✅ iOS MQTT服务初始化成功');
   }
 
-  
+  // 初始化iOS后台服务（如果需要）
+  if (Platform.isIOS) {
+    await IOSBackgroundService.initialize();
+    print('✅ iOS后台服务初始化成功');
+  }
+
   // 初始化应用生命周期监听
   final appLifecycleService = AppLifecycleService();
   appLifecycleService.initialize();
@@ -59,17 +67,114 @@ void main() async {
   runApp(const MyApp());
 }
 
-class MyApp extends StatelessWidget {
+class MyApp extends StatefulWidget {
   const MyApp({super.key});
 
-  // This widget is the root of your application.
+  @override
+  State<MyApp> createState() => _MyAppState();
+}
+
+class _MyAppState extends State<MyApp> {
+  bool _isInitialized = false;
+  bool _initializationError = false;
+  String? _errorMessage;
+  final AppPermissionService _permissionService = AppPermissionService();
+
+  @override
+  void initState() {
+    super.initState();
+    _initializeApp();
+  }
+
+  /// 初始化应用
+  Future<void> _initializeApp() async {
+    try {
+      print('🚀 开始应用初始化...');
+
+      // iOS网络权限触发 - 在应用启动时自动触发网络权限弹窗
+      if (Platform.isIOS) {
+        await _permissionService.triggerIOSNetworkPermission();
+      }
+
+      // 添加延迟以确保loading动画至少播放一段时间
+      await Future.delayed(const Duration(milliseconds: 2000));
+
+      setState(() {
+        _isInitialized = true;
+      });
+
+      print('✅ 应用初始化完成');
+    } catch (e) {
+      print('❌ 应用初始化失败: $e');
+      setState(() {
+        _initializationError = true;
+        _errorMessage = e.toString();
+      });
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'ReAI Assistant',
       theme: AppTheme.lightTheme,
       debugShowCheckedModeBanner: false,
-      home: const MyHomePage(title: 'ReAI Assistant - 硬件AI助手'),
+      home: _getHomePage(),
+    );
+  }
+
+  Widget _getHomePage() {
+    if (_initializationError) {
+      return _buildErrorPage();
+    } else if (_isInitialized) {
+      return const MyHomePage(title: 'ReAI Assistant - 硬件AI助手');
+    } else {
+      return const LoadingPage();
+    }
+  }
+
+  Widget _buildErrorPage() {
+    return Scaffold(
+      backgroundColor: AppColors.background,
+      body: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(AppDimensions.xl),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                Icons.error_outline,
+                size: 64,
+                color: AppColors.errorRed,
+              ),
+              const SizedBox(height: AppDimensions.lg),
+              Text(
+                '初始化失败',
+                style: AppTextStyles.headline2.copyWith(
+                  color: AppColors.errorRed,
+                ),
+              ),
+              const SizedBox(height: AppDimensions.md),
+              Text(
+                _errorMessage ?? '未知错误',
+                style: AppTextStyles.bodyText1,
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: AppDimensions.xl),
+              PrimaryButton(
+                text: '重试',
+                onPressed: () {
+                  setState(() {
+                    _initializationError = false;
+                    _errorMessage = null;
+                  });
+                  _initializeApp();
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
@@ -88,10 +193,16 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
   final DeviceIdService _deviceIdService = DeviceIdService();
   final MQTTService _mqttService = MQTTService();
   final BLEService _bleService = BLEService();
+  final AppPermissionService _permissionService = AppPermissionService();
 
   String? _deviceId;
   String? _formattedDeviceId;
   StreamSubscription<MQTTRequestMessage>? _mqttRequestSubscription;
+
+  // 权限状态
+  bool _showNetworkWarning = false;
+  bool _showBluetoothWarning = false;
+  Timer? _permissionRefreshTimer;
 
   @override
   void initState() {
@@ -99,12 +210,21 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     _tabController = TabController(length: 4, vsync: this);
     _initDeviceId();
     _setupMqttRequestListener();
+
+    // 延迟执行权限检测，确保UI已构建完成
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _checkPermissions();
+    });
+
+    // 设置定期权限检查，确保权限状态动态更新
+    _setupPermissionRefreshTimer();
   }
 
   @override
   void dispose() {
     _tabController.dispose();
     _mqttRequestSubscription?.cancel();
+    _permissionRefreshTimer?.cancel();
     super.dispose();
   }
 
@@ -204,6 +324,49 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
 
   
   
+  /// 检测应用权限
+  Future<void> _checkPermissions() async {
+    try {
+      debugPrint('🔍 开始应用级权限检测...');
+
+      // 主动请求权限（这会触发iOS权限对话框）
+      bool allOK = await _permissionService.checkAllPermissions(context);
+
+      // 获取详细的权限状态
+      final summary = await _permissionService.getPermissionSummary();
+
+      setState(() {
+        // 根据权限状态设置警告标志
+        if (Platform.isIOS) {
+          // iOS只需要检查蓝牙和位置权限
+          _showBluetoothWarning = summary['bluetooth'] == false ||
+                                  summary['location'] == false;
+        } else {
+          // Android需要检查所有蓝牙相关权限
+          _showBluetoothWarning = summary['bluetooth'] == false ||
+                                  summary['bluetoothScan'] == false ||
+                                  summary['bluetoothConnect'] == false ||
+                                  summary['location'] == false;
+        }
+      });
+
+      debugPrint('✅ 权限检测完成，蓝牙警告: $_showBluetoothWarning');
+    } catch (e) {
+      debugPrint('❌ 权限检测失败: $e');
+    }
+  }
+
+  /// 设置权限刷新定时器
+  void _setupPermissionRefreshTimer() {
+    // 每3秒检查一次权限状态，确保权限状态动态更新
+    _permissionRefreshTimer = Timer.periodic(Duration(seconds: 3), (timer) {
+      if (mounted) {
+        _checkPermissions();
+      }
+    });
+    debugPrint('⏰ 权限刷新定时器已启动，每3秒检查一次');
+  }
+
   /// 显示MQTT状态对话框
   void _showMQTTStatus(BuildContext context) {
     showDialog(
@@ -361,6 +524,18 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
       body: SafeArea(
         child: Column(
           children: [
+            // 权限状态横幅
+            PermissionStatusBanner(
+              showNetworkWarning: _showNetworkWarning,
+              showBluetoothWarning: _showBluetoothWarning,
+              onSettingsTap: () {
+                // 用户点击设置后重新检测权限
+                Future.delayed(Duration(seconds: 2), () {
+                  _checkPermissions();
+                });
+              },
+            ),
+
             // 顶部标题栏
             _buildAppBar(),
 
@@ -683,7 +858,7 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
               _buildHardwareCard(
                 name: '点一机 DYJ',
                 version: 'v1',
-                description: '多功能智能硬件开发平台，支持多种传感器和通信模块',
+                description: '多功能智��硬件开发平台，支持多种传感器和通信模块',
                 icon: Icons.developer_board,
                 color: AppColors.primaryGreen,
                 onTap: () {},

@@ -48,6 +48,12 @@ dependencies:
   # Background services for Android
   flutter_background: ^1.3.0
 
+  # URL launcher for opening settings
+  url_launcher: ^6.2.4
+
+  # HTTP requests for iOS network permission trigger
+  http: ^1.1.0
+
   # Device info
   device_info_plus: ^9.1.2
 

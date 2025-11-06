@@ -192,6 +192,8 @@ class FeatureCard extends StatelessWidget {
       onTap: onTap,
       padding: const EdgeInsets.all(AppDimensions.lg),
       child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           // 图标
           Container(

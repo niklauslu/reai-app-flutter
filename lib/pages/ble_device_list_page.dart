@@ -10,6 +10,7 @@ import '../components/cards/standard_card.dart';
 import '../theme/colors.dart';
 import '../theme/text_styles.dart';
 import '../constants/dimensions.dart';
+import '../services/app_permission_service.dart';
 import 'ble_device_detail_page.dart';
 
 /// BLE设备列表页面
@@ -22,6 +23,7 @@ class BLEDeviceListPage extends StatefulWidget {
 
 class _BLEDeviceListPageState extends State<BLEDeviceListPage> {
   final BLEService _bleService = BLEService();
+  final AppPermissionService _permissionService = AppPermissionService();
   List<BLEDeviceModel> _devices = [];
   bool _isScanning = false;
   String _statusMessage = '准备就绪';
@@ -37,7 +39,7 @@ class _BLEDeviceListPageState extends State<BLEDeviceListPage> {
   @override
   void initState() {
     super.initState();
-    _initializeBLE();
+    _clearDeviceList(); // 进入页面时先清空列表
     _setupListeners();
   }
 
@@ -69,11 +71,11 @@ class _BLEDeviceListPageState extends State<BLEDeviceListPage> {
       _statusMessage = '正在初始化BLE...';
     });
 
-    // 请求权限
-    bool hasPermissions = await _bleService.requestPermissions();
+    // 检查蓝牙权限（使用统一权限服务）
+    bool hasPermissions = await _permissionService.checkAllPermissions(context);
     if (!hasPermissions) {
       setState(() {
-        _statusMessage = '权限获取失败';
+        _statusMessage = '蓝牙权限未授予，请检查设置';
       });
       _showPermissionDeniedDialog();
       return;
@@ -92,9 +94,6 @@ class _BLEDeviceListPageState extends State<BLEDeviceListPage> {
       _isInitialized = true;
       _statusMessage = 'BLE初始化成功';
     });
-
-    // 自动开始扫描
-    _toggleScan();
   }
 
   /// 设置监听器
@@ -141,6 +140,16 @@ class _BLEDeviceListPageState extends State<BLEDeviceListPage> {
     });
   }
 
+  /// 清空设备列表
+  void _clearDeviceList() {
+    setState(() {
+      _devices = [];
+      _statusMessage = '准备就绪';
+    });
+    // 同时清空BLE服务中的设备列表
+    _bleService.clearDevicesList();
+  }
+
   /// 切换扫描状态
   Future<void> _toggleScan() async {
     if (!_isInitialized) {
@@ -151,6 +160,8 @@ class _BLEDeviceListPageState extends State<BLEDeviceListPage> {
     if (_isScanning) {
       await _bleService.stopScan();
     } else {
+      // 开始扫描前先清空列表
+      _clearDeviceList();
       await _bleService.startScan(timeout: const Duration(seconds: 5));
     }
   }
@@ -169,8 +180,8 @@ class _BLEDeviceListPageState extends State<BLEDeviceListPage> {
       ),
     );
 
-    // 返回后刷新设备列表以更新连接状态
-    await _refreshDevices();
+    // 返回后清空设备列表，不自动扫描
+    _clearDeviceList();
   }
 
   /// 刷新设备列表
@@ -609,7 +620,7 @@ class _BLEDeviceListPageState extends State<BLEDeviceListPage> {
                 ),
                 const SizedBox(height: AppDimensions.xs),
                 Text(
-                  'MAC: ${device.id}',
+                  'MAC: ${device.displayId}',
                   style: AppTextStyles.caption.copyWith(
                     color: AppColors.gray600,
                   ),
@@ -847,7 +858,7 @@ class _BLEDeviceListPageState extends State<BLEDeviceListPage> {
                 ),
                 const SizedBox(height: AppDimensions.xs),
                 Text(
-                  'MAC: ${device.id}',
+                  'MAC: ${device.displayId}',
                   style: AppTextStyles.caption.copyWith(
                     color: AppColors.gray600,
                   ),
@@ -897,7 +908,7 @@ class _BLEDeviceListPageState extends State<BLEDeviceListPage> {
     );
   }
 
-  /// 获取设备图标
+  /// 获取设��图标
   IconData _getDeviceIcon(DeviceType type) {
     switch (type) {
       case DeviceType.dyjV1:

@@ -6,6 +6,7 @@ import 'package:permission_handler/permission_handler.dart';
 import '../mqtt/mqtt_service.dart';
 import '../mqtt/models/mqtt_message.dart';
 import 'device_id_service.dart';
+import 'ios_background_service.dart';
 
 /// 后台服务管理器 - 使用FlutterBackground和生命周期管理
 class BackgroundServiceManager {
@@ -32,7 +33,14 @@ class BackgroundServiceManager {
 
   /// 启用后台执行（带权限请求）
   static Future<bool> enableBackgroundExecution() async {
-    if (!Platform.isAndroid || _isBackgroundExecutionEnabled) return true;
+    if (_isBackgroundExecutionEnabled) return true;
+
+    // iOS平台不需要Android的后台权限，直接返回成功
+    if (Platform.isIOS) {
+      print('🍎 iOS平台，后台执行已通过系统配置启用');
+      _isBackgroundExecutionEnabled = true;
+      return true;
+    }
 
     try {
       // 先检查是否已有必要权限
@@ -87,10 +95,15 @@ class BackgroundServiceManager {
 
   /// 禁用后台执行
   static Future<void> disableBackgroundExecution() async {
-    if (!Platform.isAndroid || !_isBackgroundExecutionEnabled) return;
+    if (!_isBackgroundExecutionEnabled) return;
 
     try {
-      await FlutterBackground.disableBackgroundExecution();
+      if (Platform.isAndroid) {
+        await FlutterBackground.disableBackgroundExecution();
+        print('🤖 Android后台执行已禁用');
+      } else if (Platform.isIOS) {
+        print('🍎 iOS后台执行已禁用');
+      }
       _isBackgroundExecutionEnabled = false;
       print('✅ 后台执行已禁用');
     } catch (e) {
@@ -183,19 +196,30 @@ class BackgroundServiceManager {
 
   /// 处理应用进入后台
   static Future<void> _handleAppBackgrounded() async {
-    if (Platform.isIOS) {
-      // iOS: 尝试保持连接，但不强制断开
-      print('🍎 iOS平台，尝试保持MQTT连接');
-      // iOS对后台运行限制更严格，但尝试维持连接
-      _setupConnectionCheck();
-      return;
+    // 统一后台处理逻辑：启用后台执行和连接检查
+    print('📱 应用进入后台，启用MQTT保活机制');
+
+    // 尝试启用后台执行（iOS/Android统一处理）
+    if (!_isBackgroundExecutionEnabled) {
+      final backgroundEnabled = await enableBackgroundExecution();
+      if (backgroundEnabled) {
+        print('✅ 后台执行已启用，MQTT连接将在后台保持');
+      } else {
+        print('⚠️ 后台执行启用失败，将使用连接保活机制');
+      }
+    } else {
+      print('✅ 后台执行已在运行');
     }
 
-    // Android: 静默尝试启用后台执行，避免重复权限请求
-    print('🤖 Android平台，尝试保持MQTT连接');
+    // iOS特殊处理：启动心跳响应定时器
+    if (Platform.isIOS) {
+      print('🍎 iOS平台，启动心跳响应定时器');
+      _startIOSHeartbeatResponse();
+    }
 
-    // 先尝试静默启用后台执行
-    if (!_isBackgroundExecutionEnabled) {
+    // Android特殊处理：前台服务
+    if (Platform.isAndroid) {
+      // 先尝试静默启用后台执行
       final hasPermissions = await _checkHasPermissions();
       if (hasPermissions) {
         final backgroundEnabled = await _enableBackgroundExecutionSilent();
@@ -207,8 +231,6 @@ class BackgroundServiceManager {
       } else {
         print('⚠️ 缺少通知权限，跳过前台服务');
       }
-    } else {
-      print('✅ 前台服务已在运行');
     }
 
     // 发送在线状态消息保持连接活跃
@@ -231,6 +253,12 @@ class BackgroundServiceManager {
     print('📱 应用回到前台');
 
     try {
+      // iOS特殊处理：停止心跳响应定时器
+      if (Platform.isIOS) {
+        print('🍎 iOS平台，停止心跳响应定时器');
+        _stopIOSHeartbeatResponse();
+      }
+
       // 检查MQTT连接状态
       final mqttService = MQTTService();
       final currentStatus = mqttService.currentStatus;
@@ -306,9 +334,40 @@ class BackgroundServiceManager {
   static Future<void> dispose() async {
     _connectionCheckTimer?.cancel();
     _connectionCheckTimer = null;
+
+    // iOS特殊清理：停止心跳响应定时器
+    if (Platform.isIOS) {
+      _stopIOSHeartbeatResponse();
+    }
+
     await disableBackgroundExecution();
     _isInitialized = false;
     _isBackgroundMode = false;
+  }
+
+  /// 启动iOS心跳响应定时器
+  static void _startIOSHeartbeatResponse() {
+    if (!Platform.isIOS) return;
+
+    // 调用iOS后台服务的心跳响应
+    try {
+      IOSBackgroundService.startHeartbeatResponse();
+      print('🍎 iOS心跳响应定时器已启动');
+    } catch (e) {
+      print('❌ 启动iOS心跳响应失败: $e');
+    }
+  }
+
+  /// 停止iOS心跳响应定时器
+  static void _stopIOSHeartbeatResponse() {
+    if (!Platform.isIOS) return;
+
+    try {
+      IOSBackgroundService.stopHeartbeatResponse();
+      print('🍎 iOS心跳响应定时器已停止');
+    } catch (e) {
+      print('❌ 停止iOS心跳响应失败: $e');
+    }
   }
 
   /// 获取后台模式状态

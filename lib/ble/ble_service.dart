@@ -17,6 +17,7 @@ class BLEService {
   final List<BLEDeviceModel> _scannedDevices = [];
   BluetoothDevice? _currentConnectedDevice; // 单设备连接管理
   BLEProtocolHandler? _protocolHandler; // 协议处理器
+  StreamSubscription<List<ScanResult>>? _scanResultsSubscription; // 扫描结果订阅
 
   // 状态流
   final StreamController<bool> _isScanningController = StreamController<bool>.broadcast();
@@ -147,11 +148,10 @@ class BLEService {
         }
       } else if (Platform.isIOS) {
         debugPrint('🍎 iOS平台权限请求');
-        // iOS权限请求
+        // iOS只需要蓝牙和位置权限
         Map<Permission, PermissionStatus> statuses = await [
           Permission.bluetooth,
-          Permission.bluetoothScan,
-          Permission.bluetoothConnect,
+          Permission.locationWhenInUse,
         ].request();
 
         debugPrint('📋 iOS权限请求结果: $statuses');
@@ -210,7 +210,7 @@ class BLEService {
       debugPrint('✅ BLE扫描已启动');
 
       // 监听扫描结果
-      FlutterBluePlus.scanResults.listen((List<ScanResult> results) {
+      _scanResultsSubscription = FlutterBluePlus.scanResults.listen((List<ScanResult> results) {
         debugPrint('📡 收到 ${results.length} 个扫描结果');
         _processScanResults(results);
       });
@@ -235,6 +235,11 @@ class BLEService {
 
     try {
       debugPrint('🛑 正在停止BLE扫描...');
+
+      // 取消扫描结果订阅
+      await _scanResultsSubscription?.cancel();
+      _scanResultsSubscription = null;
+
       await FlutterBluePlus.stopScan();
       _isScanning = false;
       _isScanningController.add(false);
@@ -246,6 +251,14 @@ class BLEService {
       debugPrint(msg);
       _statusController.add(msg);
     }
+  }
+
+  /// 清空设备列表
+  void clearDevicesList() {
+    debugPrint('🗑️ 清空设备列表');
+    _scannedDevices.clear();
+    _devicesController.add([]);
+    _statusController.add('设备列表已清空');
   }
 
   /// 处理扫描结果

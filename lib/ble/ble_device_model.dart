@@ -154,6 +154,21 @@ class BLEDeviceModel {
     }
   }
 
+  /// 获取用于显示的设备ID/MAC地址
+  String get displayId {
+    if (Platform.isIOS) {
+      // iOS设备ID格式很长，取最后一个-后面的部分
+      if (id.contains('-')) {
+        return id.split('-').last;
+      }
+      // 如果没有-，取最后6位
+      return id.length > 6 ? id.substring(id.length - 6) : id;
+    } else {
+      // Android显示完整的MAC地址格式
+      return id;
+    }
+  }
+
   @override
   bool operator ==(Object other) {
     if (identical(this, other)) return true;

@@ -318,7 +318,7 @@ class _BLEDeviceDetailPageState extends State<BLEDeviceDetailPage> {
               icon: Icons.perm_device_info,
               iconColor: AppColors.primaryGreen,
               label: 'MAC地址',
-              value: widget.device.id,
+              value: widget.device.displayId,
               valueColor: AppColors.deepBlack,
             ),
 

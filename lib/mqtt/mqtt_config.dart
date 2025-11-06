@@ -4,8 +4,12 @@ import 'dart:math';
 class MQTTConfig {
   static const String server = '14.103.243.230';
   static const int port = 1883;
+  static const int sslPort = 8883; // SSL/TLS端口
   static const String username = 'device_user';
   static const String password = 'eedd1012ab2546fc3c41a0ab3b629ffb';
+
+  // 连接模式：'tcp' 或 'ssl'
+  static const String connectionMode = 'tcp'; // 使用TCP连接
 
   // 心跳设置 - 延长心跳间隔以提高后台连接稳定性
   static const int keepAlive = 120; // 2分钟心跳间隔，适合后台运行

@@ -111,8 +111,15 @@ class MQTTService {
       print('客户端ID: $clientId');
       print('设备ID: $deviceId');
 
+      // 根据配置选择端口和连接方式
+      final useSsl = MQTTConfig.connectionMode == 'ssl';
+      final port = useSsl ? MQTTConfig.sslPort : MQTTConfig.port;
+
+      print('连接模式: ${useSsl ? "SSL/TLS" : "TCP"}');
+      print('端口: $port');
+
       // 创建MQTT客户端
-      _client = MqttServerClient.withPort(MQTTConfig.server, clientId, MQTTConfig.port);
+      _client = MqttServerClient.withPort(MQTTConfig.server, clientId, port);
       _client!.logging(on: false); // 关闭详细日志以提高性能
       _client!.keepAlivePeriod = MQTTConfig.keepAlive;
 
@@ -140,6 +147,12 @@ class MQTTService {
       _client!.onSubscribeFail = _onSubscribeFail;
 
       print('开始连接...');
+      print('🔍 网络连接诊断:');
+      print('   - 服务器地址: ${MQTTConfig.server}');
+      print('   - 端口: $port');
+      print('   - SSL模式: $useSsl');
+      print('   - 客户端ID: $clientId');
+      print('   - 用户名: ${MQTTConfig.username.isNotEmpty ? MQTTConfig.username : "无"}');
 
       // 设置连接超时
       await _client!.connect();
