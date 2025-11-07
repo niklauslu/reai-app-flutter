@@ -30,10 +30,28 @@ android {
         versionName = flutter.versionName
     }
 
+    signingConfigs {
+        create("release") {
+            storeFile = file("key.jks")
+            storePassword = "reai123456"
+            keyAlias = "reai_key"
+            keyPassword = "reai123456"
+        }
+    }
+
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
+            // 使用发布签名配置
+            signingConfig = signingConfigs.getByName("release")
+            // 启用代码压缩和混淆
+            isMinifyEnabled = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android.txt"),
+                "proguard-rules.pro"
+            )
+        }
+        debug {
+            // Debug版本使用默认签名（测试用）
             signingConfig = signingConfigs.getByName("debug")
         }
     }
