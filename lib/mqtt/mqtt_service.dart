@@ -258,11 +258,60 @@ class MQTTService {
 
     final message = MQTTTopicMessage(topic: topic, payload: payload);
 
+    // 预处理消息，检查重复请求
+    if (!_shouldProcessMessage(message)) {
+      print('🚫 消息被重复检查过滤，跳过处理');
+      return;
+    }
+
     // 首先发送到普通消息流
     _messageController.add(message);
 
     // 处理请求-响应逻辑
     _handleRequestResponseLogic(message);
+  }
+
+  /// 检查消息是否应该被处理（重复过滤）
+  bool _shouldProcessMessage(MQTTTopicMessage message) {
+    try {
+      // 对于请求消息，检查重复ID
+      if (message.isDeviceRequestTopic) {
+        final request = MQTTRequestMessage.fromTopicMessage(message);
+        final requestKey = '${request.id}_${request.method}';
+
+        // 检查是否为重复请求ID
+        if (_processedRequestIds.contains(requestKey)) {
+          print('⚠️ 检测到重复请求ID，在消息入口处过滤: ${request.method}#${request.id}');
+          return false;
+        }
+
+        // 标记请求ID为已处理
+        _processedRequestIds.add(requestKey);
+        print('🔥 通过重复检查的新请求: ${request.method}#${request.id}');
+      }
+
+      // 对于响应消息，也可以进行重复检查
+      if (message.isResponseTopic) {
+        final response = MQTTResponseMessage.fromTopicMessage(message);
+        final responseKey = '${response.id}_${response.method}';
+
+        // 检查是否为重复响应ID
+        if (_processedRequestIds.contains(responseKey)) {
+          print('⚠️ 检测到重复响应ID，在消息入口处过滤: ${response.method}#${response.id}');
+          return false;
+        }
+
+        // 标记响应ID为已处理
+        _processedRequestIds.add(responseKey);
+        print('✅ 通过重复检查的新响应: ${response.method}#${response.id}');
+      }
+
+      return true;
+    } catch (e) {
+      print('❌ 消息重复检查失败，允许通过: $e');
+      // 如果解析失败，允许消息通过处理
+      return true;
+    }
   }
 
   /// 处理请求-响应逻辑
@@ -283,21 +332,11 @@ class MQTTService {
         return;
       }
 
-      // 处理请求消息
+      // 处理请求消息 (重复检查已在_shouldProcessMessage中完成)
       if (message.isDeviceRequestTopic) {
         try {
           final request = MQTTRequestMessage.fromTopicMessage(message);
-          final requestKey = '${request.id}_${request.method}';
-
-          // 检查是否为重复请求ID
-          if (_processedRequestIds.contains(requestKey)) {
-            print('⚠️ 检测到重复请求ID，跳过处理: ${request.method}#${request.id}');
-            return;
-          }
-
-          // 标记请求ID为已处理
-          _processedRequestIds.add(requestKey);
-          print('🔥 收到新请求消息: ${request.method}#${request.id}');
+          print('🔥 处理新请求消息: ${request.method}#${request.id}');
 
           // 注册请求并设置5秒超时
           _requestManager.registerRequest(request, timeout: Duration(seconds: 5));
