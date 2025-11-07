@@ -697,13 +697,17 @@ class BLEService {
 
       subscription = _protocolHandler!.messageStream.listen((messageData) {
         debugPrint('📨 [BLE服务] 收到响应: $messageData');
+        debugPrint('🔍 [BLE服务] 检查匹配: 期望cmd="$method", 实际cmd="${messageData['cmd']}"');
 
         // 检查是否是对应方法的响应
         if (messageData['cmd'] == method) {
+          debugPrint('✅ [BLE服务] 响应匹配成功!');
           response = messageData;
           if (!completer.isCompleted) {
             completer.complete(response);
           }
+        } else {
+          debugPrint('❌ [BLE服务] 响应不匹配，继续等待...');
         }
       });
 
