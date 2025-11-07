@@ -14,6 +14,9 @@ class AppPermissionService {
   /// 权限状态缓存
   Map<String, bool> _permissionStatusCache = {};
 
+  /// 权限请求状态锁，防止重复请求
+  bool _isRequestingPermissions = false;
+
   /// 检测所有必需权限
   Future<bool> checkAllPermissions(BuildContext context) async {
     debugPrint('🔍 开始检测应用权限...');
@@ -112,18 +115,24 @@ class AppPermissionService {
 
   /// 检测蓝牙权限
   Future<bool> _checkBluetoothPermissions(BuildContext context) async {
+    // 防止重复请求
+    if (_isRequestingPermissions) {
+      debugPrint('⚠️ 权限请求正在进行中，跳过重复请求');
+      return false;
+    }
+
     try {
+      _isRequestingPermissions = true;
       debugPrint('🔵 开始检测蓝牙权限...');
 
       if (Platform.isAndroid) {
         // Android 12+ 蓝牙权限请求
         debugPrint('🤖 Android蓝牙权限请求');
 
-        // 请求蓝牙权限（扫描、连接、广告）
+        // 请求蓝牙权限（扫描、连接）
         Map<Permission, PermissionStatus> bluetoothStatuses = await [
           Permission.bluetoothScan,
           Permission.bluetoothConnect,
-          Permission.bluetoothAdvertise,
         ].request();
 
         debugPrint('📋 Android蓝牙权限状态: $bluetoothStatuses');
@@ -137,20 +146,13 @@ class AppPermissionService {
         var locationStatus = await Permission.locationWhenInUse.request();
         debugPrint('📋 位置权限状态: $locationStatus');
 
-        // 检查蓝牙服务是否启用
-        var bluetoothServiceStatus = await Permission.bluetooth.serviceStatus;
-        debugPrint('📋 蓝牙服务状态: $bluetoothServiceStatus');
-
         bool allPermissionsGranted = scanGranted && connectGranted && locationStatus.isGranted;
-        bool bluetoothServiceEnabled = bluetoothServiceStatus.isEnabled;
 
-        bool allOK = allPermissionsGranted && bluetoothServiceEnabled;
-
-        if (allOK) {
-          debugPrint('✅ Android蓝牙权限和服务已全部授予');
+        if (allPermissionsGranted) {
+          debugPrint('✅ Android蓝牙权限已全部授予');
           return true;
         } else {
-          debugPrint('⚠️ Android权限缺失: 扫描=$scanGranted, 连接=$connectGranted, 位置=${locationStatus.isGranted}, 蓝牙服务=$bluetoothServiceEnabled');
+          debugPrint('⚠️ Android权限缺失: 扫描=$scanGranted, 连接=$connectGranted, 位置=${locationStatus.isGranted}');
           return false;
         }
 
@@ -166,21 +168,16 @@ class AppPermissionService {
         var locationStatus = await Permission.locationWhenInUse.request();
         debugPrint('📋 iOS位置权限状态: $locationStatus');
 
-        // 检查蓝牙服务是否启用
-        var bluetoothServiceStatus = await Permission.bluetooth.serviceStatus;
-        debugPrint('📋 iOS蓝牙服务状态: $bluetoothServiceStatus');
-
         bool bluetoothGranted = bluetoothStatus.isGranted;
         bool locationGranted = locationStatus.isGranted;
-        bool bluetoothServiceEnabled = bluetoothServiceStatus.isEnabled;
 
-        bool allOK = bluetoothGranted && locationGranted && bluetoothServiceEnabled;
+        bool allOK = bluetoothGranted && locationGranted;
 
         if (allOK) {
-          debugPrint('✅ iOS蓝牙权限和服务已全部授予');
+          debugPrint('✅ iOS蓝牙权限已全部授予');
           return true;
         } else {
-          debugPrint('⚠️ iOS权限缺失: 蓝牙=$bluetoothGranted, 位置=$locationGranted, 蓝牙服务=$bluetoothServiceEnabled');
+          debugPrint('⚠️ iOS权限缺失: 蓝牙=$bluetoothGranted, 位置=$locationGranted');
           return false;
         }
       }
@@ -188,6 +185,8 @@ class AppPermissionService {
     } catch (e) {
       debugPrint('💥 蓝牙权限检测异常: $e');
       return false;
+    } finally {
+      _isRequestingPermissions = false;
     }
   }
 

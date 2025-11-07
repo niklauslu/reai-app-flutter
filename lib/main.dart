@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'dart:io';
+import 'package:permission_handler/permission_handler.dart';
 import 'theme/app_theme.dart';
 import 'components/cards/standard_card.dart';
 import 'components/buttons/app_buttons.dart';
@@ -91,13 +92,25 @@ class _MyAppState extends State<MyApp> {
     try {
       print('🚀 开始应用初始化...');
 
-      // iOS网络权限触发 - 在应用启动时自动触发网络权限弹窗
+      // 1. iOS网络权限触发 - 在应用启动时自动触发网络权限弹窗
       if (Platform.isIOS) {
         await _permissionService.triggerIOSNetworkPermission();
       }
 
-      // 添加延迟以确保loading动画至少播放一段时间
-      await Future.delayed(const Duration(milliseconds: 2000));
+      print('📋 开始权限检测和授权...');
+
+      // 2. 检测并请求所有必需权限（蓝牙和位置权限）
+      // 这里需要一个context，但还没有，所以先检查权限状态
+      bool permissionsOK = await _checkAllPermissionsSilently();
+
+      if (permissionsOK) {
+        print('✅ 所有权限检测通过');
+      } else {
+        print('⚠️ 部分权限未授权，将在主页面继续处理');
+      }
+
+      // 3. 确保loading动画至少播放2.5秒钟，给用户良好的体验
+      await Future.delayed(const Duration(milliseconds: 2500));
 
       setState(() {
         _isInitialized = true;
@@ -110,6 +123,41 @@ class _MyAppState extends State<MyApp> {
         _initializationError = true;
         _errorMessage = e.toString();
       });
+    }
+  }
+
+  /// 静默检查权限（不需要context）
+  Future<bool> _checkAllPermissionsSilently() async {
+    try {
+      // 检查蓝牙权限
+      if (Platform.isIOS) {
+        // iOS检查蓝牙和位置权限
+        final bluetoothStatus = await Permission.bluetooth.status;
+        final locationStatus = await Permission.locationWhenInUse.status;
+
+        bool bluetoothOK = bluetoothStatus.isGranted;
+        bool locationOK = locationStatus.isGranted;
+
+        print('📋 iOS权限状态: 蓝牙=${bluetoothOK}, 位置=${locationOK}');
+
+        return bluetoothOK && locationOK;
+      } else {
+        // Android检查蓝牙扫描、连接和位置权限
+        final scanStatus = await Permission.bluetoothScan.status;
+        final connectStatus = await Permission.bluetoothConnect.status;
+        final locationStatus = await Permission.locationWhenInUse.status;
+
+        bool scanOK = scanStatus.isGranted;
+        bool connectOK = connectStatus.isGranted;
+        bool locationOK = locationStatus.isGranted;
+
+        print('📋 Android权限状态: 扫描=${scanOK}, 连接=${connectOK}, 位置=${locationOK}');
+
+        return scanOK && connectOK && locationOK;
+      }
+    } catch (e) {
+      print('❌ 静默权限检查失败: $e');
+      return false;
     }
   }
 
@@ -332,25 +380,18 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
       // 主动请求权限（这会触发iOS权限对话框）
       bool allOK = await _permissionService.checkAllPermissions(context);
 
-      // 获取详细的权限状态
-      final summary = await _permissionService.getPermissionSummary();
-
       setState(() {
-        // 根据权限状态设置警告标志
-        if (Platform.isIOS) {
-          // iOS只需要检查蓝牙和位置权限
-          _showBluetoothWarning = summary['bluetooth'] == false ||
-                                  summary['location'] == false;
-        } else {
-          // Android需要检查所有蓝牙相关权限
-          _showBluetoothWarning = summary['bluetooth'] == false ||
-                                  summary['bluetoothScan'] == false ||
-                                  summary['bluetoothConnect'] == false ||
-                                  summary['location'] == false;
-        }
+        // 只检查权限是否全部授予，不显示具体警告
+        _showBluetoothWarning = !allOK;
       });
 
       debugPrint('✅ 权限检测完成，蓝牙警告: $_showBluetoothWarning');
+
+      // 如果权限检测通过，停止定时检测
+      if (allOK && _permissionRefreshTimer != null && _permissionRefreshTimer!.isActive) {
+        _permissionRefreshTimer!.cancel();
+        debugPrint('✅ 权限检测通过，已停止定时检测');
+      }
     } catch (e) {
       debugPrint('❌ 权限检测失败: $e');
     }
@@ -434,42 +475,97 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
                       ),
                     ],
                   ),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 24),
 
-                  // 操作按钮
-                  if (status != MQTTConnectionStatus.connected &&
-                      status != MQTTConnectionStatus.connecting)
-                    ElevatedButton.icon(
-                      onPressed: () {
-                        Navigator.pop(context);
-                        MQTTService().connect();
-                      },
-                      icon: const Icon(Icons.refresh),
-                      label: const Text('重新连接'),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppColors.primaryGreen,
-                        foregroundColor: Colors.white,
+                  // 操作按钮区域
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                    children: [
+                      // 重新连接按钮
+                      if (status != MQTTConnectionStatus.connected &&
+                          status != MQTTConnectionStatus.connecting)
+                        Expanded(
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 4),
+                            child: ElevatedButton.icon(
+                              onPressed: () {
+                                Navigator.pop(context);
+                                MQTTService().connect();
+                              },
+                              icon: const Icon(Icons.refresh, size: 16),
+                              label: const Text('重新连接'),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: AppColors.primaryGreen,
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                  vertical: 8,
+                                ),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+
+                      // 断开连接按钮
+                      if (status == MQTTConnectionStatus.connected)
+                        Expanded(
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 4),
+                            child: ElevatedButton.icon(
+                              onPressed: () {
+                                Navigator.pop(context);
+                                MQTTService().disconnect();
+                              },
+                              icon: const Icon(Icons.power_settings_new, size: 16),
+                              label: const Text('断开连接'),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.red,
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                  vertical: 8,
+                                ),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+
+                      // 关闭按钮
+                      Expanded(
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 4),
+                          child: ElevatedButton.icon(
+                            onPressed: () => Navigator.pop(context),
+                            icon: const Icon(Icons.close, size: 16),
+                            label: const Text('关闭'),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.grey[600],
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 8,
+                              ),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                            ),
+                          ),
+                        ),
                       ),
-                    ),
-                  if (status == MQTTConnectionStatus.connected)
-                    TextButton.icon(
-                      onPressed: () {
-                        Navigator.pop(context);
-                        MQTTService().disconnect();
-                      },
-                      icon: const Icon(Icons.power_settings_new),
-                      label: const Text('断开连接'),
-                    ),
+                    ],
+                  ),
                 ],
               );
             },
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('关闭'),
-            ),
-          ],
+          // 移除默认的actions，因为我们已经将关闭按钮集成到内容区域
+          actions: [],
         );
       },
     );
@@ -556,13 +652,7 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
       ),
       // 底部导航栏
       bottomNavigationBar: _buildBottomNavigationBar(),
-      // 浮动操作按钮
-      floatingActionButton: const FloatingActionButtonWidget(
-        icon: Icons.chat,
-        tooltip: 'AI助手',
-      ),
-      floatingActionButtonLocation: FloatingActionButtonLocation.endDocked,
-    );
+      );
   }
 
   /// 构建顶部标题栏
@@ -858,7 +948,7 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
               _buildHardwareCard(
                 name: '点一机 DYJ',
                 version: 'v1',
-                description: '多功能智��硬件开发平台，支持多种传感器和通信模块',
+                description: '多功能智能硬件开发平台，支持多种传感器和通信模块',
                 icon: Icons.developer_board,
                 color: AppColors.primaryGreen,
                 onTap: () {},

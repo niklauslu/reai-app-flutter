@@ -190,40 +190,46 @@ class FeatureCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return StandardCard(
       onTap: onTap,
-      padding: const EdgeInsets.all(AppDimensions.lg),
+      padding: const EdgeInsets.all(AppDimensions.md),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           // 图标
           Container(
-            width: 48,
-            height: 48,
+            width: 40,
+            height: 40,
             decoration: BoxDecoration(
               color: (backgroundColor ?? AppColors.lightGreen).withOpacity(0.3),
               borderRadius: BorderRadius.circular(AppDimensions.smallCardRadius),
             ),
             child: Icon(
               icon,
-              size: AppDimensions.iconLarge,
+              size: AppDimensions.iconMedium,
               color: iconColor ?? AppColors.primaryGreen,
             ),
           ),
-          const SizedBox(height: AppDimensions.md),
+          const SizedBox(height: AppDimensions.sm),
           // 标题
-          Text(
-            title,
-            style: AppTextStyles.headline4,
-            textAlign: TextAlign.center,
-          ),
-          if (description != null) ...[
-            const SizedBox(height: AppDimensions.xs),
-            Text(
-              description!,
-              style: AppTextStyles.caption,
+          Flexible(
+            child: Text(
+              title,
+              style: AppTextStyles.headline4,
               textAlign: TextAlign.center,
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          if (description != null) ...[
+            const SizedBox(height: 4),
+            Flexible(
+              child: Text(
+                description!,
+                style: AppTextStyles.caption,
+                textAlign: TextAlign.center,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
             ),
           ],
         ],

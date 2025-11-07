@@ -41,30 +41,8 @@ class _PermissionStatusBannerState extends State<PermissionStatusBanner> {
   }
 
   bool _hasPermissionIssues() {
-    if (widget.showNetworkWarning || widget.showBluetoothWarning) {
-      return true;
-    }
-
-    if (_permissionSummary == null) return false;
-
-    // 根据平台检查蓝牙权限
-    if (Platform.isIOS) {
-      // iOS只需要检查蓝牙和位置权限
-      if (_permissionSummary!['bluetooth'] == false ||
-          _permissionSummary!['location'] == false) {
-        return true;
-      }
-    } else {
-      // Android需要检查所有蓝牙相关权限
-      if (_permissionSummary!['bluetooth'] == false ||
-          _permissionSummary!['bluetoothScan'] == false ||
-          _permissionSummary!['bluetoothConnect'] == false ||
-          _permissionSummary!['location'] == false) {
-        return true;
-      }
-    }
-
-    return false;
+    // 直接使用外部传入的警告状态，不进行内部检测
+    return widget.showNetworkWarning || widget.showBluetoothWarning;
   }
 
   List<Widget> _getPermissionWarnings() {
@@ -74,23 +52,7 @@ class _PermissionStatusBannerState extends State<PermissionStatusBanner> {
       warnings.add(_buildNetworkWarning());
     }
 
-    // 检查蓝牙权限警告
-    bool hasBluetoothPermissionIssue = false;
-    if (_permissionSummary != null) {
-      if (Platform.isIOS) {
-        // iOS检查蓝牙和位置权限
-        hasBluetoothPermissionIssue = _permissionSummary!['bluetooth'] == false ||
-                                      _permissionSummary!['location'] == false;
-      } else {
-        // Android检查所有蓝牙相关权限
-        hasBluetoothPermissionIssue = _permissionSummary!['bluetooth'] == false ||
-                                      _permissionSummary!['bluetoothScan'] == false ||
-                                      _permissionSummary!['bluetoothConnect'] == false ||
-                                      _permissionSummary!['location'] == false;
-      }
-    }
-
-    if (widget.showBluetoothWarning || hasBluetoothPermissionIssue) {
+    if (widget.showBluetoothWarning) {
       warnings.add(_buildBluetoothWarning());
     }
 
@@ -232,7 +194,7 @@ class _PermissionStatusIndicatorState extends State<PermissionStatusIndicator> {
     if (_permissionSummary == null) return false;
 
     if (Platform.isIOS) {
-      // iOS只需要检查蓝牙和位置权限
+      // iOS需要检查蓝牙、位置权限
       return _permissionSummary!['bluetooth'] == true &&
              _permissionSummary!['location'] == true;
     } else {

@@ -81,9 +81,9 @@ class IOSBackgroundService {
           print('❌ iOS后台MQTT重连失败: $e');
         }
       } else {
-        // 如果已连接，发送在线状态保持连接活跃
+        // 如果已连接，发送心跳状态保持连接活跃
         try {
-          await mqttService.sendOnlineStatus();
+          await mqttService.sendHeartbeatStatus();
           print('💓 iOS后台MQTT心跳成功');
         } catch (e) {
           print('⚠️ iOS后台MQTT心跳失败: $e');

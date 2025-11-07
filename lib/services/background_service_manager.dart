@@ -310,8 +310,8 @@ class BackgroundServiceManager {
         } else {
           // 如果已连接，发送轻量级心跳保持连接活跃
           try {
-            // 发送在线状态，这会保持连接和会话活跃
-            await mqttService.sendOnlineStatus();
+            // 发送心跳状态，这会保持连接和会话活跃
+            await mqttService.sendHeartbeatStatus();
             print('💓 后台心跳保持成功');
           } catch (e) {
             print('⚠️ 后台心跳发送失败，连接可能已断开: $e');

@@ -401,6 +401,25 @@ class MQTTService {
     await _sendOnlineStatus();
   }
 
+  /// 发送心跳状态消息
+  Future<void> sendHeartbeatStatus() async {
+    if (_deviceId == null) return;
+
+    final deviceIdService = DeviceIdService();
+    final deviceName = await deviceIdService.getDeviceName();
+
+    final heartbeatMessage = {
+      'deviceId': _deviceId!,
+      'type': 'heartbeat',
+      'deviceName': deviceName,
+      'deviceType': 'ReAIAssistantApp',
+      'timestamp': DateTime.now().millisecondsSinceEpoch ~/ 1000,
+    };
+
+    final topic = MQTTConfig.getDeviceStatusTopic(_deviceId!);
+    await publishMessage(topic, jsonEncode(heartbeatMessage));
+  }
+
   /// 更新连接状态
   void _updateStatus(MQTTConnectionStatus newStatus) {
     if (_status != newStatus) {

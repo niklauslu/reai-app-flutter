@@ -74,8 +74,27 @@ class BLEService {
 
       debugPrint('✅ 蓝牙支持检查通过');
 
-      // 检查蓝牙适配器状态
-      var adapterState = await FlutterBluePlus.adapterState.first;
+      // 检查蓝牙适配器状态，增加等待和重试机制
+      BluetoothAdapterState adapterState;
+      int retryCount = 0;
+      const maxRetries = 3;
+
+      do {
+        adapterState = await FlutterBluePlus.adapterState.first;
+        if (adapterState == BluetoothAdapterState.on) {
+          break;
+        }
+
+        retryCount++;
+        if (retryCount < maxRetries) {
+          msg = '📴 蓝牙未开启，等待开启... ($retryCount/$maxRetries)';
+          debugPrint(msg);
+          _statusController.add(msg);
+          // 等待2秒再重试
+          await Future.delayed(const Duration(seconds: 2));
+        }
+      } while (retryCount < maxRetries);
+
       if (adapterState != BluetoothAdapterState.on) {
         msg = '📴 蓝牙未开启，请开启蓝牙后重试';
         debugPrint(msg);

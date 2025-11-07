@@ -138,8 +138,17 @@ class _BLEDeviceDetailPageState extends State<BLEDeviceDetailPage> {
   void _showSnackBar(String message, Color color) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(message),
-        backgroundColor: color,
+        content: Center(
+          child: Text(
+            message,
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ),
+        backgroundColor: Colors.black,
         duration: const Duration(seconds: 2),
       ),
     );
@@ -481,16 +490,10 @@ class _BLEDeviceDetailPageState extends State<BLEDeviceDetailPage> {
   /// 构建操作提示文字
   Widget _buildOperationHint() {
     if (_isConnecting) {
-      return Container(
-        width: double.infinity,
+      return Padding(
         padding: const EdgeInsets.symmetric(
           horizontal: AppDimensions.md,
           vertical: AppDimensions.xs,
-        ),
-        decoration: BoxDecoration(
-          color: Colors.blue.withOpacity(0.1),
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: Colors.blue.withOpacity(0.3)),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
@@ -521,16 +524,10 @@ class _BLEDeviceDetailPageState extends State<BLEDeviceDetailPage> {
     }
 
     if (_isConnected) {
-      return Container(
-        width: double.infinity,
+      return Padding(
         padding: const EdgeInsets.symmetric(
           horizontal: AppDimensions.md,
           vertical: AppDimensions.xs,
-        ),
-        decoration: BoxDecoration(
-          color: Colors.green.withOpacity(0.1),
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: Colors.green.withOpacity(0.3)),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
@@ -557,16 +554,10 @@ class _BLEDeviceDetailPageState extends State<BLEDeviceDetailPage> {
       );
     }
 
-    return Container(
-      width: double.infinity,
+    return Padding(
       padding: const EdgeInsets.symmetric(
         horizontal: AppDimensions.md,
         vertical: AppDimensions.xs,
-      ),
-      decoration: BoxDecoration(
-        color: Colors.orange.withOpacity(0.1),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Colors.orange.withOpacity(0.3)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,

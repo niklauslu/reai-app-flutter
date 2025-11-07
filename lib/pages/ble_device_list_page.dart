@@ -35,12 +35,21 @@ class _BLEDeviceListPageState extends State<BLEDeviceListPage> {
   StreamSubscription? _devicesSubscription;
   StreamSubscription? _statusSubscription;
   StreamSubscription? _connectionStateSubscription;
+  StreamSubscription? _bluetoothStateSubscription;
 
   @override
   void initState() {
     super.initState();
     _clearDeviceList(); // 进入页面时先清空列表
     _setupListeners();
+
+    // 自动初始化BLE
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _initializeBLE();
+    });
+
+    // 监听蓝牙适配器状态变化
+    _setupBluetoothStateListener();
   }
 
   @override
@@ -50,6 +59,7 @@ class _BLEDeviceListPageState extends State<BLEDeviceListPage> {
     _devicesSubscription?.cancel();
     _statusSubscription?.cancel();
     _connectionStateSubscription?.cancel();
+    _bluetoothStateSubscription?.cancel();
 
     // 停止扫描
     _bleService.stopScan();
@@ -71,8 +81,10 @@ class _BLEDeviceListPageState extends State<BLEDeviceListPage> {
       _statusMessage = '正在初始化BLE...';
     });
 
-    // 检查蓝牙权限（使用统一权限服务）
-    bool hasPermissions = await _permissionService.checkAllPermissions(context);
+    // 只检查权限状态，不主动请求权限
+    Map<String, dynamic> permissionSummary = await _permissionService.getPermissionSummary();
+    bool hasPermissions = _checkPermissionsFromSummary(permissionSummary);
+
     if (!hasPermissions) {
       setState(() {
         _statusMessage = '蓝牙权限未授予，请检查设置';
@@ -94,6 +106,20 @@ class _BLEDeviceListPageState extends State<BLEDeviceListPage> {
       _isInitialized = true;
       _statusMessage = 'BLE初始化成功';
     });
+  }
+
+  /// 从权限摘要检查权限状态（不请求权限）
+  bool _checkPermissionsFromSummary(Map<String, dynamic> summary) {
+    if (Platform.isIOS) {
+      // iOS需要蓝牙和位置权限
+      return summary['bluetooth'] == true && summary['location'] == true;
+    } else {
+      // Android需要蓝牙扫描、连接和位置权限
+      return summary['bluetooth'] == true &&
+             summary['bluetoothScan'] == true &&
+             summary['bluetoothConnect'] == true &&
+             summary['location'] == true;
+    }
   }
 
   /// 设置监听器
@@ -229,13 +255,31 @@ class _BLEDeviceListPageState extends State<BLEDeviceListPage> {
           ElevatedButton(
             onPressed: () {
               Navigator.pop(context);
-              _initializeBLE(); // 重新尝试
+              _requestPermissionsAndRetry(); // 请求权限并重试
             },
             child: const Text('重试'),
           ),
         ],
       ),
     );
+  }
+
+  /// 请求权限并重试
+  Future<void> _requestPermissionsAndRetry() async {
+    setState(() {
+      _statusMessage = '正在请求权限...';
+    });
+
+    // 只有在用户点击重试时才真正请求权限
+    bool hasPermissions = await _permissionService.checkAllPermissions(context);
+
+    if (hasPermissions) {
+      // 权限获取成功，重新初始化BLE
+      _initializeBLE();
+    } else {
+      // 权限获取失败，显示设置提示
+      _permissionService.showPermissionSettingsTip(context);
+    }
   }
 
   
@@ -814,7 +858,7 @@ class _BLEDeviceListPageState extends State<BLEDeviceListPage> {
                         ),
                       ),
                     const Spacer(),
-                    // 连接状态标识
+                    // 连接状��标识
                     Container(
                       padding: const EdgeInsets.symmetric(
                         horizontal: AppDimensions.xs,
@@ -943,6 +987,39 @@ class _BLEDeviceListPageState extends State<BLEDeviceListPage> {
     if (rssi >= -50) return AppColors.primaryGreen;
     if (rssi >= -70) return AppColors.warningYellow;
     return AppColors.errorRed;
+  }
+
+  /// 设置蓝牙状态监听器
+  void _setupBluetoothStateListener() {
+    _bluetoothStateSubscription = FlutterBluePlus.adapterState.listen((BluetoothAdapterState state) {
+      if (!mounted) return;
+
+      debugPrint('📱 蓝牙状态变化: $state');
+
+      switch (state) {
+        case BluetoothAdapterState.on:
+          // 蓝牙开启时，如果未初始化则尝试初始化
+          if (!_isInitialized) {
+            debugPrint('🟢 蓝牙已开启，尝试初始化BLE');
+            _initializeBLE();
+          } else {
+            debugPrint('🟢 蓝牙已开启，BLE已初始化');
+          }
+          break;
+        case BluetoothAdapterState.off:
+          setState(() {
+            _statusMessage = '蓝牙已关闭，请开启蓝牙后重试';
+          });
+          break;
+        case BluetoothAdapterState.unavailable:
+          setState(() {
+            _statusMessage = '蓝牙不可用';
+          });
+          break;
+        default:
+          break;
+      }
+    });
   }
 }
 

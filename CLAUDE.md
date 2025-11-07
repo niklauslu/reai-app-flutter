@@ -214,8 +214,38 @@ flutter pub upgrade
 
 ## 版本历史
 
-### v1.2.1 (当前版本) - BLE设备列表UI优化
+### v1.3.0 (当前版本) - iOS后台常驻机制完整实现
 **提交**: 待提交
+**新增功能**:
+- iOS后台常驻机制完整实现，与Android保持功能一致
+- BackgroundTaskManager.swift原生后台任务管理器
+- iOS BGTaskScheduler + BGAppRefreshTask后台调度系统
+- AppDelegate生命周期管理，自动启停后台任务
+- iOS和Android统一使用heartbeat类型MQTT心跳消息
+- Flutter端IOSBackgroundService完整实现
+- 45-60秒心跳间隔，支持系统级智能调度
+
+**技术架构**:
+- **iOS方案**: BGTaskScheduler系统级调度，电池友好
+- **Android方案**: FlutterBackground + 前台服务，连接稳定
+- **消息一致性**: 两平台都发送heartbeat类型消息
+- **心跳间隔**: 统一45-60秒间隔配置
+- **权限配置**: iOS Info.plist后台权限完整配置
+
+**代码实现**:
+- BackgroundTaskManager.swift: iOS原生后台任务管理
+- IOSBackgroundService.dart: Flutter端iOS后台服务
+- AppDelegate.swift: 应用生命周期管理
+- MQTT服务sendHeartbeatStatus()方法
+- 完整的iOS-Android功能一致性验证
+
+**配置优化**:
+- iOS Info.plist后台模式配置
+- .gitignore添加iOS CocoaPods忽略规则
+- 项目文档更新，记录完整实现细节
+
+### v1.2.1 - BLE设备列表UI优化
+**提交**: e3aad34
 **新增功能**:
 - 已连接设备显示区域，解决用户返回列表时丢失连接状态的问题
 - 智能设备分类显示，已连接设备和未连接设备分区展示
