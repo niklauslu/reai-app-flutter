@@ -689,13 +689,15 @@ class BLEService {
       // 等待设备响应
       debugPrint('⏳ [BLE服务] 等待设备响应...');
 
-      // 订阅消息流以获取响应
+      // 使用协议消息流以获取响应
       Map<String, dynamic>? response;
       StreamSubscription? subscription;
 
       final completer = Completer<Map<String, dynamic>?>();
 
-      subscription = _protocolHandler!.messageStream.listen((messageData) {
+      debugPrint('🔍 [BLE服务] 开始监听协议消息流，等待cmd="$method"的响应');
+
+      subscription = _protocolMessageController.stream.listen((messageData) {
         debugPrint('📨 [BLE服务] 收到响应: $messageData');
         debugPrint('🔍 [BLE服务] 检查匹配: 期望cmd="$method", 实际cmd="${messageData['cmd']}"');
 
